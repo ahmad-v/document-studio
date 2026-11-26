@@ -4,6 +4,7 @@ Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_
 
 | Operation | Scope | Status |
 |---|---|---|
+| text-docx | UTF-8 plain text to DOCX | implemented-unverified |
 | markdown-docx | Basic ATX headings and literal paragraphs to DOCX | Linux fixture-tested |
 | ocr-png | Optional private Tesseract and English data | Linux x64 smoke-tested |
 | pdf-info | PDF version and page count; optional JSON | Linux fixture-tested |

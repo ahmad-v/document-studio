@@ -5,6 +5,13 @@
   "verified_capabilities": [],
   "development_routes": [
     {
+      "operation": "text-docx",
+      "description": "UTF-8 plain text to DOCX",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "pending compilation"
+    },
+    {
       "operation": "ocr-png",
       "description": "Experimental English OCR for PNG with optional verified private engine",
       "status": "implemented-unverified",

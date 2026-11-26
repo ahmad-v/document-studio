@@ -7,6 +7,7 @@ use std::{io::Write, path::Path};
 use zip::{write::SimpleFileOptions, ZipWriter};
 pub const OPERATIONS:&[Operation]=&[
  Operation{id:"markdown-docx",label:"Markdown to DOCX",hint:"Basic headings and plain paragraphs only. Choose new .docx output."},
+ Operation{id:"text-docx",label:"Plain text to DOCX",hint:"Convert UTF-8 text to literal DOCX paragraphs. Choose a new .docx output."},
  Operation{id:"pdf-info",label:"PDF information",hint:"Show the PDF version and page count. Optional new JSON output."},
  Operation{id:"pdf-text",label:"PDF text",hint:"Extract text from PDF text layer. Optional new .txt output. No OCR."},
  Operation{id:"pdf-split",label:"PDF page range",hint:"Parameter inclusive page range, e.g. 2-4. New .pdf output. Experimental; not sanitization."},
@@ -37,12 +38,13 @@ fn xml(s: &str) -> Result<String> {
     }
     Ok(out)
 }
-fn docx(p: &Path, source: &str, j: &Job) -> Result<()> {
+fn docx(p: &Path, source: &str, markdown: bool, j: &Job) -> Result<()> {
     let mut body = String::new();
     for line in source.lines() {
         j.check()?;
         let hashes = line.bytes().take_while(|&c| c == b'#').count();
-        let heading = (1..=6).contains(&hashes) && line.as_bytes().get(hashes) == Some(&b' ');
+        let heading =
+            markdown && (1..=6).contains(&hashes) && line.as_bytes().get(hashes) == Some(&b' ');
         let content = if heading { &line[hashes + 1..] } else { line };
         let style = if heading {
             format!("<w:pPr><w:outlineLvl w:val=\"{}\"/></w:pPr>", hashes - 1)
@@ -172,12 +174,15 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
     let mut written = None;
     let mut warnings = vec![];
     let preview = match r.operation.as_str() {
-        "markdown-docx" => {
+        "markdown-docx" | "text-docx" => {
             extension(&r.output, "docx")?;
             let input = String::from_utf8(read_bounded(&r.input, 2 * 1024 * 1024)?).map_err(err)?;
-            docx(&r.output, &input, &j)?;
+            let markdown = r.operation == "markdown-docx";
+            docx(&r.output, &input, markdown, &j)?;
             written = Some(r.output);
-            warnings.push("Only ATX headings and literal paragraphs; inline markup, tables, images and layout are not interpreted.".into());
+            if markdown {
+                warnings.push("Only ATX headings and literal paragraphs; inline markup, tables, images and layout are not interpreted.".into());
+            }
             "Created basic DOCX".into()
         }
         #[cfg(feature = "ocr")]
@@ -281,7 +286,7 @@ mod tests {
     fn docx_parts() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("a.docx");
-        docx(&p, "# Café & science\nA < B", &Job::new()).unwrap();
+        docx(&p, "# Café & science\nA < B", true, &Job::new()).unwrap();
         let mut z = zip::ZipArchive::new(std::fs::File::open(p).unwrap()).unwrap();
         let mut s = String::new();
         use std::io::Read;
@@ -292,6 +297,34 @@ mod tests {
         assert!(s.contains("Café &amp; science"));
         assert!(s.contains("A &lt; B"));
     }
+    #[test]
+    fn text_docx_preserves_literal_heading_characters() {
+        use std::io::Read as _;
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input.txt");
+        let output = dir.path().join("output.docx");
+        std::fs::write(&input, "# literal").unwrap();
+        handle(
+            Request {
+                operation: "text-docx".into(),
+                input,
+                output: output.clone(),
+                ..Request::default()
+            },
+            Job::new(),
+        )
+        .unwrap();
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(output).unwrap()).unwrap();
+        let mut xml = String::new();
+        archive
+            .by_name("word/document.xml")
+            .unwrap()
+            .read_to_string(&mut xml)
+            .unwrap();
+        assert!(xml.contains("# literal"));
+        assert!(!xml.contains("outlineLvl"));
+    }
+
     #[test]
     fn xml_control() {
         assert!(xml("\u{1}").is_err());
