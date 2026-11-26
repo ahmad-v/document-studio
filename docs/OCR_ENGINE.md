@@ -26,4 +26,16 @@ The smoke used host-provided Tesseract and Leptonica shared libraries as build/t
 
 For a reviewed Linux pack, place the private shared libraries under `engines/tesseract/lib/`. Every library must be a regular file, including each name required by the loader. Run `python3 packaging/ocr_library_manifest.py engines/tesseract` to create a new manifest and obtain its SHA-256. Add that reviewed digest to the two existing build pins as `DOCUMENT_OCR_LIBRARIES_SHA256`.
 
-The app checks the pinned manifest and its exact library listing and limits before setting a child-only search path. Keep the installed files in a trusted directory. Source-only manifest checks have passed. A complete matching library set, its license record, and runtime validation on a clean target host are still pending.
+The app checks the pinned manifest and its exact library listing and limits before setting a child-only search path. Keep the installed files in a trusted directory. The source-built candidate below includes a matching library set and Debian package notices. Clean-target and in-app validation of this exact pack remain pending.
+
+### Source-built Linux x86_64 candidate
+
+Tesseract 5.5.0 was built from upstream commit `64eab6c457b2337dd690746a5fde5c222b40d5f8` against Debian Leptonica 1.84.1-4. The build disabled curl, archive support, training tools, the legacy recognizer, graphics, and OpenMP. The pack includes the shared libraries other than the host glibc and ELF loader. It records the Debian package versions and copyright notices alongside the upstream Tesseract license.
+
+On Debian 13.7 with glibc 2.41, the staged engine recognized `LOCAL DOCUMENT OCR` from a synthetic PNG. The process ran with a cleared environment, an explicit private library path, and socket creation blocked. System call tracing observed no socket or connect calls. Dependency resolution confirmed that the remaining shared libraries loaded from the pack.
+
+| Build pin | Candidate SHA-256 |
+| --- | --- |
+| `DOCUMENT_OCR_TESSERACT_SHA256` | `daee7207c0e56228102d5db02287d0f95f5a2bdd034d199a2b4ccf1f9a055ccd` |
+| `DOCUMENT_OCR_ENGLISH_SHA256` | `7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2` |
+| `DOCUMENT_OCR_LIBRARIES_SHA256` | `74aec2b6c155dc6de784f7bcb761fc6d6badd76eea036eff2d1fd8e952fc367e` |
