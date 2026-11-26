@@ -89,3 +89,5 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+      - name: Verify optional OCR adapter compiles
+        run: cargo check --locked --features ocr --all-targets
