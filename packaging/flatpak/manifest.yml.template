@@ -1,0 +1,24 @@
+# Template only. Pin reviewed runtime/SDK commits, Rust extension and cargo vendor sources before build.
+app-id: org.localwright.DocumentStudio
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: document-studio
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+modules:
+  - name: document-studio
+    buildsystem: simple
+    build-commands:
+      - cargo build --offline --locked --release
+      - install -Dm755 target/release/document-studio /app/bin/document-studio
+      - install -Dm644 packaging/linux/org.localwright.DocumentStudio.desktop /app/share/applications/org.localwright.DocumentStudio.desktop
+      - install -Dm644 packaging/linux/org.localwright.DocumentStudio.metainfo.xml /app/share/metainfo/org.localwright.DocumentStudio.metainfo.xml
+      - install -Dm644 packaging/linux/org.localwright.DocumentStudio.svg /app/share/icons/hicolor/scalable/apps/org.localwright.DocumentStudio.svg
+    sources: [] # Replace with exact source commits and verified vendor manifest; do not enable build network.

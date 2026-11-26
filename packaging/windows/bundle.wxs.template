@@ -1,0 +1,7 @@
+<!-- Candidate only; verify WiX Burn native ARM64 and x64 and reviewed extension version. Not built. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle Name="Document Studio" Manufacturer="Development snapshot" Version="0.1.0.0" UpgradeCode="62d2b7fc-ac60-5a9b-8422-b3cb0fa977f2">
+    <BootstrapperApplication><bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense" LicenseUrl="" /></BootstrapperApplication>
+    <Chain><MsiPackage SourceFile="$(var.MsiPath)" Compressed="yes" /></Chain>
+  </Bundle>
+</Wix>

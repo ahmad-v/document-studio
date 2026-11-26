@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "project": "document-studio",
+  "version": "0.1.0-alpha.1",
+  "verified_capabilities": [],
+  "development_routes": [
+    {
+      "operation": "markdown-docx",
+      "description": "Basic ATX headings and literal paragraphs to DOCX",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "not run"
+    },
+    {
+      "operation": "pdf-text",
+      "description": "PDF text-layer extraction",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "not run"
+    },
+    {
+      "operation": "pdf-split",
+      "description": "Experimental page range",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "not run"
+    },
+    {
+      "operation": "pdf-merge",
+      "description": "Experimental two-document page-only merge",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "not run"
+    }
+  ]
+}

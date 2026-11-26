@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Document Studio
+Exec=document-studio
+Icon=org.localwright.DocumentStudio
+Terminal=false
+Categories=Utility;
