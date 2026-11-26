@@ -21,3 +21,9 @@ Choose **Experimental PNG OCR** in the workbench. For CLI use `document-studio -
 The Linux x86_64 smoke staged Debian's Tesseract 5.5.0 executable and English data next to the app. Both assets matched the build-time digests. A synthetic PNG returned the expected text with socket creation blocked. The test also refused an existing output and a modified English data file.
 
 The smoke used host-provided Tesseract and Leptonica shared libraries as build/test fixtures. A distributable private pack still requires the complete native library set, license notices, a manifest and clean-device tests. The standard builds omit the optional OCR feature.
+
+## Linux private libraries
+
+For a reviewed Linux pack, place the private shared libraries under `engines/tesseract/lib/`. Every library must be a regular file, including each name required by the loader. Run `python3 packaging/ocr_library_manifest.py engines/tesseract` to create a new manifest and obtain its SHA-256. Add that reviewed digest to the two existing build pins as `DOCUMENT_OCR_LIBRARIES_SHA256`.
+
+The app checks the pinned manifest and its exact library listing and limits before setting a child-only search path. Keep the installed files in a trusted directory. Source-only manifest checks have passed. A complete matching library set, its license record, and runtime validation on a clean target host are still pending.

@@ -32,6 +32,74 @@ fn component(root: &Path, name: &str, pinned: Option<&str>, limit: u64) -> Resul
     Ok(path)
 }
 
+#[cfg(target_os = "linux")]
+fn private_libraries(root: &Path, job: &Job) -> Result<Option<std::ffi::OsString>> {
+    let directory = root.join("lib");
+    let Some(pin) = option_env!("DOCUMENT_OCR_LIBRARIES_SHA256") else {
+        if directory.exists() {
+            return Err(Error::engine(
+                "Private OCR libraries require a build-time manifest pin",
+            ));
+        }
+        return Ok(None);
+    };
+    if directory.canonicalize()? != directory {
+        return Err(Error::engine(
+            "Private OCR library directory must not redirect",
+        ));
+    }
+    let manifest_path = root.join("libraries.json");
+    if manifest_path.canonicalize()? != manifest_path {
+        return Err(Error::engine("OCR library manifest must not redirect"));
+    }
+    let bytes = read_bounded(&manifest_path, 64 * 1024)?;
+    if !format!("{:x}", Sha256::digest(&bytes)).eq_ignore_ascii_case(pin) {
+        return Err(Error::engine("OCR library manifest checksum mismatch"));
+    }
+    let manifest: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let libraries = manifest["libraries"]
+        .as_object()
+        .filter(|entries| !entries.is_empty() && entries.len() <= 128)
+        .ok_or_else(|| Error::engine("Invalid OCR library manifest"))?;
+    if manifest["schema_version"].as_u64() != Some(1) {
+        return Err(Error::engine("Unsupported OCR library manifest version"));
+    }
+    let mut count = 0;
+    let mut total_bytes = 0u64;
+    for entry in fs::read_dir(&directory)? {
+        job.check()?;
+        let entry = entry?;
+        count += 1;
+        let name = entry.file_name();
+        let name = name
+            .to_str()
+            .filter(|name| {
+                name.contains(".so")
+                    && !name.starts_with('.')
+                    && name
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b".-+_".contains(&b))
+            })
+            .ok_or_else(|| Error::engine("Invalid private OCR library name"))?;
+        let expected = libraries
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| Error::engine(format!("Unlisted OCR library: {name}")))?;
+        let metadata = entry.metadata()?;
+        total_bytes = total_bytes
+            .checked_add(metadata.len())
+            .filter(|size| *size <= 256 * 1024 * 1024)
+            .ok_or_else(|| Error::engine("OCR library pack exceeds the byte limit"))?;
+        component(&directory, name, Some(expected), 64 * 1024 * 1024)?;
+    }
+    if count != libraries.len() {
+        return Err(Error::engine("OCR library pack is incomplete"));
+    }
+    std::env::join_paths([directory])
+        .map(Some)
+        .map_err(|error| Error::engine(error.to_string()))
+}
+
 fn png(input: &Path) -> Result<Vec<u8>> {
     let bytes = read_bounded(input, 16 * 1024 * 1024)?;
     if bytes.get(..16) != Some(b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR") {
@@ -113,6 +181,10 @@ pub fn recognize(input: &Path, job: &Job) -> Result<String> {
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .stdout(Stdio::piped());
+    #[cfg(target_os = "linux")]
+    if let Some(search_path) = private_libraries(&root, job)? {
+        command.env("LD_LIBRARY_PATH", search_path);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
