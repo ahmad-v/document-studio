@@ -5,6 +5,7 @@ Nothing is verified on a native target. The machine-readable registry is a devel
 | Operation | Route | Evidence status |
 |---|---|---|
 | markdown-docx | Basic ATX headings and literal paragraphs to DOCX | implemented-unverified |
+| ocr-png-pdf | One-page searchable PDF from a PNG with optional private OCR | Linux x86_64 CLI and independent reader smoke-tested |
 | compare-text | UTF-8 line changes with optional plain-text report | implemented-unverified |
 | pdf-text | PDF text-layer extraction | implemented-unverified |
 | pdf-split | Experimental page range | implemented-unverified |

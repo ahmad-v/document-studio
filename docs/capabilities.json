@@ -12,6 +12,13 @@
       "fixture_status": "pending compilation"
     },
     {
+      "operation": "ocr-png-pdf",
+      "description": "One-page searchable PDF from PNG with private English OCR",
+      "status": "implemented-unverified",
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "fixture_status": "Linux CLI and independent text, page count and image smoke passed"
+    },
+    {
       "operation": "ocr-png",
       "description": "Experimental English OCR for PNG with optional verified private engine",
       "status": "implemented-unverified",

@@ -16,7 +16,9 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"pdf-reorder",label:"Reorder PDF pages",hint:"Enter every page once, in the desired order, e.g. 3,1,2. Choose a new .pdf output."},
  Operation{id:"pdf-merge",label:"Merge PDFs",hint:"Input first PDF; parameter second PDF path. New .pdf output. Experimental page-only merge."},
  #[cfg(feature="ocr")]
- Operation{id:"ocr-png",label:"Experimental PNG OCR",hint:"Recognize English text using the private OCR pack. Optional new .txt output."}];
+ Operation{id:"ocr-png",label:"Experimental PNG OCR",hint:"Recognize English text using the private OCR pack. Optional new .txt output."},
+ #[cfg(feature="ocr")]
+ Operation{id:"ocr-png-pdf",label:"Searchable PDF from PNG",hint:"Create a new one-page PDF with the original image and a recognized English text layer."}];
 fn err(e: impl std::fmt::Display) -> Error {
     Error::input(e.to_string())
 }
@@ -232,6 +234,19 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
                 "Experimental English OCR. Review the recognized text against the original.".into(),
             );
             recognized.chars().take(24000).collect()
+        }
+        #[cfg(feature = "ocr")]
+        "ocr-png-pdf" => {
+            extension(&r.output, "pdf")?;
+            let pdf = ocr::searchable_pdf(&r.input, &j)?;
+            j.check()?;
+            write_bytes(&r.output, &pdf)?;
+            written = Some(r.output);
+            warnings.push(
+                "Experimental English OCR. Review the searchable text against the original image."
+                    .into(),
+            );
+            "Created a one-page searchable PDF".into()
         }
         "compare-text" => {
             let report = compare::compare(&r.input, Path::new(&r.parameter), &j)?;

@@ -4,6 +4,7 @@ Development source only. Launch the GUI after compiling. Choose an operation, en
 
 - `text-docx`: Writes literal paragraphs from UTF-8 text. Leading Markdown characters are preserved.
 - `markdown-docx`: Basic ATX headings and literal paragraphs to DOCX.
+- `ocr-png-pdf`: Create a new one-page PDF with the source PNG and recognized English text. The optional OCR build and matching installed pack are required.
 - `ocr-png`: English PNG OCR in an [optional engine build](OCR_ENGINE.md).
 - `compare-text`: Provide the original UTF-8 file as input and the revised file path as the parameter. Preview changes or save a new `.txt` report. Escaped line endings make missing final newlines and CRLF changes visible. Each input is limited to 1 MiB and 50,000 lines. Highly dissimilar inputs can reach the diff work limit.
 - `pdf-info` reports the PDF version and page count with optional JSON output.

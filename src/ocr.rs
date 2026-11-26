@@ -134,6 +134,24 @@ fn wait(child: &mut Child, job: &Job) -> Result<ExitStatus> {
 }
 
 pub fn recognize(input: &Path, job: &Job) -> Result<String> {
+    let bytes = run(input, false, job)?;
+    String::from_utf8(bytes).map_err(|_| Error::engine("OCR did not produce UTF-8 text"))
+}
+
+pub fn searchable_pdf(input: &Path, job: &Job) -> Result<Vec<u8>> {
+    let bytes = run(input, true, job)?;
+    let document = lopdf::Document::load_mem(&bytes)
+        .map_err(|_| Error::engine("OCR did not produce a valid PDF"))?;
+    if document.is_encrypted() || document.get_pages().len() != 1 {
+        return Err(Error::engine("Expected a one-page unencrypted OCR PDF"));
+    }
+    job.check()?;
+    Ok(bytes)
+}
+
+fn run(input: &Path, pdf: bool, job: &Job) -> Result<Vec<u8>> {
+    const MAX_PDF: u64 = 64 * 1024 * 1024;
+    let output_limit = if pdf { MAX_PDF } else { MAX_TEXT };
     job.check()?;
     let app = std::env::current_exe()?.canonicalize()?;
     let root = app
@@ -181,6 +199,9 @@ pub fn recognize(input: &Path, job: &Job) -> Result<String> {
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .stdout(Stdio::piped());
+    if pdf {
+        command.args(["-c", "tessedit_create_pdf=1"]);
+    }
     #[cfg(target_os = "linux")]
     if let Some(search_path) = private_libraries(&root, job)? {
         command.env("LD_LIBRARY_PATH", search_path);
@@ -199,7 +220,7 @@ pub fn recognize(input: &Path, job: &Job) -> Result<String> {
     let result = thread::scope(|scope| {
         let reader = scope.spawn(move || {
             let mut bytes = Vec::new();
-            stdout.take(MAX_TEXT + 1).read_to_end(&mut bytes)?;
+            stdout.take(output_limit + 1).read_to_end(&mut bytes)?;
             Ok::<_, std::io::Error>(bytes)
         });
         let status = wait(&mut child, job);
@@ -211,16 +232,16 @@ pub fn recognize(input: &Path, job: &Job) -> Result<String> {
             .join()
             .map_err(|_| Error::engine("OCR reader stopped"))??;
         let status = status?;
-        if bytes.len() as u64 > MAX_TEXT {
+        if bytes.len() as u64 > output_limit {
             return Err(Error::new(
                 ErrorKind::Limit,
-                "OCR output exceeds the text limit",
+                "OCR output exceeds the size limit",
             ));
         }
         if !status.success() {
             return Err(Error::engine(format!("OCR engine failed ({status})")));
         }
-        String::from_utf8(bytes).map_err(|_| Error::engine("OCR did not produce UTF-8 text"))
+        Ok::<_, Error>(bytes)
     })?;
     job.check()?;
     Ok(result)
