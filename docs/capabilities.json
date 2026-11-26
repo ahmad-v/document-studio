@@ -5,6 +5,13 @@
   "verified_capabilities": [],
   "development_routes": [
     {
+      "operation": "pdf-info",
+      "description": "PDF version and page count; optional JSON",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "Linux fixture passed"
+    },
+    {
       "operation": "markdown-docx",
       "description": "Basic ATX headings and literal paragraphs to DOCX",
       "status": "implemented-unverified",

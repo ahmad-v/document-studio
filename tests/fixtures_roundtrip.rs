@@ -45,3 +45,19 @@ fn pdf_extract_split_merge() {
     assert_eq!(d.get_pages().len(), 3);
     assert!(d.extract_text(&[3]).unwrap().contains("Page two"));
 }
+
+#[test]
+fn pdf_information_fixture() {
+    let outcome = document_studio::handle(
+        Request {
+            operation: "pdf-info".into(),
+            input: "tests/fixtures/two-pages.pdf".into(),
+            ..Request::default()
+        },
+        Job::new(),
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&outcome.preview).unwrap();
+    assert_eq!(report["pages"], 2);
+    assert_eq!(report["pdf_version"], "1.3");
+}

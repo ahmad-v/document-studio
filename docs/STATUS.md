@@ -5,6 +5,7 @@ Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_
 | Operation | Scope | Status |
 |---|---|---|
 | markdown-docx | Basic ATX headings and literal paragraphs to DOCX | Linux fixture-tested |
+| pdf-info | PDF version and page count; optional JSON | Linux fixture-tested |
 | pdf-text | PDF text-layer extraction | Linux fixture-tested |
 | pdf-split | Experimental page range | Linux fixture-tested |
 | pdf-merge | Experimental two-document page-only merge | Linux fixture-tested |
