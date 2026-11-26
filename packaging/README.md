@@ -17,5 +17,7 @@ Baseline workflow calls ZIP, DEB or DMG after locked tests and build. It intenti
 Windows MSI and EXE must use the same product identity and payload, separately verify repair/upgrade/uninstall and architecture, and embed all payloads. Candidate application ID `org.localwright.DocumentStudio` is not a verified owner namespace or trademark. Product GUID generated deterministically as a proposed identifier, not an existing registered product. Review before fixing identity. Linux and macOS require real-device validation. No signing keys, service accounts or secrets are included.
 
 ## Portable CI previews
+The Linux OCR development variant can bundle a reviewed private engine and execute the packaged fixture. See [OCR engine documentation](../docs/OCR_ENGINE.md).
+
 
 The check workflow builds an unsigned portable archive on each native target, extracts it, runs CLI help from the extracted payload, and uploads it with SHA-256 checksums. Download it from a successful job under GitHub Actions artifacts. Launch the executable from the extracted folder. These archives are intended for evaluation. Linux may require system libraries, and macOS Gatekeeper may block an unsigned executable.

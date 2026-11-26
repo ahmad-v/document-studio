@@ -43,3 +43,17 @@ On Debian 13.7 with glibc 2.41, the staged engine recognized `LOCAL DOCUMENT OCR
 The Linux x86_64 Document Studio CLI was built with `ocr` and all three candidate pins. From a fresh application staging directory it recognized the synthetic PNG through the source-built pack and wrote the expected text to a new output. The traced app and child made no socket or connect calls while socket creation was blocked. This validates the app-relative route on the build host. Clean-device and installer evidence remain open.
 
 The same pack supports `document-studio --cli ocr-png-pdf sample.png searchable.pdf`. The PDF route uses the built-in PDF renderer and checks that the generated output is a one-page unencrypted PDF before publishing it. Poppler extracted the expected text, reported one page, and extracted image pixels matching the source PNG in the Linux fixture. A second write refused an existing output. The run was traced with socket creation blocked and made no socket or connect calls.
+
+### Building a portable OCR preview
+
+After building a default GUI-enabled binary with `--features ocr`, pass the reviewed Linux engine directory to the preview packager:
+
+```sh
+python3 packaging/portable.py --target x86_64-unknown-linux-gnu \
+  --binary target/debug/document-studio --ocr-pack /path/to/engines/tesseract \
+  --output dist/preview-ocr
+```
+
+The source pack must contain `tesseract`, `libraries.json`, `lib/`, `tessdata/eng.traineddata`, and a flat `notices/` directory. The packager checks architecture and bounds, collects the OCR-enabled dependency notices, and runs the included English reference fixture against the unpacked application. The application verifies the staged executable, data, and libraries against its build pins before engine execution. This route creates an unsigned development archive. Standard installers and cross-platform OCR packs still require separate verification.
+
+The Linux x64 preview passed archive checksum verification and text recognition from its extracted payload. Searchable PDF generation also passed from that payload, with Poppler confirming the expected English text. The native Tesseract license was present. Staging rejected a symlinked pack and an ELF architecture mismatch.

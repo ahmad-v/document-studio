@@ -12,10 +12,11 @@ def sha256(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def collect(repo, bundle, target, binary):
+def collect(repo, bundle, target, binary, features=()):
+    feature_args = ["--features", ",".join(features)] if features else []
     metadata = json.loads(subprocess.check_output(
         [os.environ.get("CARGO", "cargo"), "metadata", "--locked",
-         "--filter-platform", target, "--format-version", "1"],
+         "--filter-platform", target, "--format-version", "1", *feature_args],
         cwd=repo, encoding="utf-8",
     ))
     resolve = metadata["resolve"]
