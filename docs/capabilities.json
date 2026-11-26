@@ -28,6 +28,13 @@
       "fixture_status": "Linux x64 smoke passed"
     },
     {
+      "operation": "docx-text",
+      "description": "UTF-8 WordprocessingML main-body plain text",
+      "status": "implemented-unverified",
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "fixture_status": "Linux fixtures and independent Python DOCX verification passed"
+    },
+    {
       "operation": "compare-text",
       "description": "UTF-8 line changes with optional text report",
       "status": "implemented-unverified",

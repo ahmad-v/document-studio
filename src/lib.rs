@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 mod compare;
+mod docx_text;
 #[cfg(feature = "ocr")]
 mod ocr;
 use localwright_core::*;
@@ -9,6 +10,7 @@ use zip::{write::SimpleFileOptions, ZipWriter};
 pub const OPERATIONS:&[Operation]=&[
  Operation{id:"markdown-docx",label:"Markdown to DOCX",hint:"Basic headings and plain paragraphs only. Choose new .docx output."},
  Operation{id:"text-docx",label:"Plain text to DOCX",hint:"Convert UTF-8 text to literal DOCX paragraphs. Choose a new .docx output."},
+ Operation{id:"docx-text",label:"DOCX body text",hint:"Extract plain text from a DOCX document body. Optional new .txt output."},
  Operation{id:"compare-text",label:"Compare text files",hint:"Enter the second UTF-8 text file path as the parameter. Optional new .txt report."},
  Operation{id:"pdf-info",label:"PDF information",hint:"Show the PDF version and page count. Optional new JSON output."},
  Operation{id:"pdf-text",label:"PDF text",hint:"Extract text from PDF text layer. Optional new .txt output. No OCR."},
@@ -247,6 +249,17 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
                     .into(),
             );
             "Created a one-page searchable PDF".into()
+        }
+        "docx-text" => {
+            let text = docx_text::extract(&r.input, &j)?;
+            if !r.output.as_os_str().is_empty() {
+                extension(&r.output, "txt")?;
+                j.check()?;
+                write_bytes(&r.output, text.as_bytes())?;
+                written = Some(r.output);
+            }
+            warnings.push("Body text only. Layout, list markers, headers, images and annotations are omitted. Hidden body text may appear.".into());
+            text.chars().take(24000).collect()
         }
         "compare-text" => {
             let report = compare::compare(&r.input, Path::new(&r.parameter), &j)?;
