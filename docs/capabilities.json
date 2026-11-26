@@ -5,6 +5,13 @@
   "verified_capabilities": [],
   "development_routes": [
     {
+      "operation": "pdf-rotate",
+      "description": "Rotate a selected page range clockwise relative to existing rotation",
+      "status": "implemented-unverified",
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "fixture_status": "Linux fixture and CLI checks passed"
+    },
+    {
       "operation": "text-docx",
       "description": "UTF-8 plain text to DOCX",
       "status": "implemented-unverified",

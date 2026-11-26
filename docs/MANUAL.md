@@ -17,3 +17,5 @@ Development source only. Launch the GUI after compiling. Choose an operation, en
 Limitations: Basic DOCX only; inline Markdown and layout omitted. PDF parsing and decompression limits are incomplete, active content can survive split/merge, and these operations are not redaction or sanitization. Page-only merge drops page annotations, document-level metadata/bookmarks/forms, and may lose inherited or unusual structures; no independent reader validation yet. No OCR, PDF renderer, Office fidelity, legacy converters, or structural and visual comparison.
 
 No output overwrite is allowed. No accounts, ads, telemetry or runtime downloads are intended. Do not use this unverified snapshot with valuable or hostile input. Citation and donations are voluntary.
+
+- `pdf-rotate`: Enter a page range and a clockwise angle, such as `2-4,90`, and choose a new PDF path. Angles of 90, 180 and 270 degrees are supported. Rotation is relative to each selected page’s current orientation.

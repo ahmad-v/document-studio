@@ -4,6 +4,7 @@ Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_
 
 | Operation | Scope | Status |
 |---|---|---|
+| pdf-rotate | Rotate a selected page range clockwise relative to existing rotation | Linux fixture and CLI-tested |
 | text-docx | UTF-8 plain text to DOCX | implemented-unverified |
 | markdown-docx | Basic ATX headings and literal paragraphs to DOCX | Linux fixture-tested |
 | ocr-png | Optional private Tesseract and English data | Linux x64 smoke-tested |

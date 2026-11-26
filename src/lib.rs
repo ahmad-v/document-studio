@@ -15,6 +15,7 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"pdf-info",label:"PDF information",hint:"Show the PDF version and page count. Optional new JSON output."},
  Operation{id:"pdf-text",label:"PDF text",hint:"Extract text from PDF text layer. Optional new .txt output. No OCR."},
  Operation{id:"pdf-split",label:"PDF page range",hint:"Parameter inclusive page range, e.g. 2-4. New .pdf output. Experimental; not sanitization."},
+ Operation{id:"pdf-rotate",label:"Rotate PDF pages",hint:"Enter start-end,degrees, e.g. 2-4,90. Use 90, 180 or 270 clockwise. Choose a new PDF."},
  Operation{id:"pdf-reorder",label:"Reorder PDF pages",hint:"Enter every page once, in the desired order, e.g. 3,1,2. Choose a new .pdf output."},
  Operation{id:"pdf-merge",label:"Merge PDFs",hint:"Input first PDF; parameter second PDF path. New .pdf output. Experimental page-only merge."},
  #[cfg(feature="ocr")]
@@ -139,6 +140,57 @@ fn merge(mut a: Document, mut b: Document, j: &Job) -> Result<Document> {
     let a_order = a.get_pages().into_values().collect();
     let b_order = b.get_pages().into_values().collect();
     rebuild_pages([(a, a_order), (b, b_order)], "1.7", j)
+}
+
+fn page_range(
+    parameter: &str,
+    pages: &std::collections::BTreeMap<u32, lopdf::ObjectId>,
+) -> Result<(u32, u32)> {
+    let (start, end) = parameter
+        .split_once('-')
+        .ok_or_else(|| Error::input("Expected start-end"))?;
+    let (start, end): (u32, u32) = (
+        start.trim().parse().map_err(err)?,
+        end.trim().parse().map_err(err)?,
+    );
+    if start == 0 || start > end || !pages.contains_key(&start) || !pages.contains_key(&end) {
+        return Err(Error::input("Invalid page range"));
+    }
+    Ok((start, end))
+}
+
+fn rotate_pages(doc: &mut Document, parameter: &str, job: &Job) -> Result<()> {
+    let (range, angle) = parameter
+        .split_once(',')
+        .ok_or_else(|| Error::input("Expected start-end,degrees"))?;
+    let angle: i64 = angle.trim().parse().map_err(err)?;
+    if !matches!(angle, 90 | 180 | 270) {
+        return Err(Error::input("Choose 90, 180 or 270 degrees clockwise"));
+    }
+    let pages = doc.get_pages();
+    let (start, end) = page_range(range, &pages)?;
+    for (_, &id) in pages.range(start..=end) {
+        job.check()?;
+        let previous = match inherited(doc, id, b"Rotate")? {
+            Some(Object::Reference(reference)) => doc
+                .get_object(reference)
+                .and_then(Object::as_i64)
+                .map_err(err)?,
+            Some(value) => value.as_i64().map_err(err)?,
+            None => 0,
+        };
+        if previous % 90 != 0 {
+            return Err(Error::input(
+                "Existing PDF rotation is not a multiple of 90 degrees",
+            ));
+        }
+        let rotation = (previous.rem_euclid(360) + angle) % 360;
+        doc.get_object_mut(id)
+            .and_then(Object::as_dict_mut)
+            .map_err(err)?
+            .set("Rotate", rotation);
+    }
+    Ok(())
 }
 
 fn reorder(d: Document, order: &str, j: &Job) -> Result<Document> {
@@ -311,19 +363,12 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
             );
             s.chars().take(24000).collect()
         }
-        "pdf-split" | "pdf-merge" | "pdf-reorder" => {
+        "pdf-split" | "pdf-merge" | "pdf-reorder" | "pdf-rotate" => {
             extension(&r.output, "pdf")?;
             let mut d = load(&r.input)?;
             if r.operation == "pdf-split" {
-                let (a, b) = r
-                    .parameter
-                    .split_once('-')
-                    .ok_or_else(|| Error::input("Expected start-end"))?;
-                let (a, b): (u32, u32) = (a.parse().map_err(err)?, b.parse().map_err(err)?);
                 let pages = d.get_pages();
-                if a == 0 || a > b || !pages.contains_key(&a) || !pages.contains_key(&b) {
-                    return Err(Error::input("Invalid page range"));
-                }
+                let (a, b) = page_range(&r.parameter, &pages)?;
                 let remove = pages
                     .keys()
                     .copied()
@@ -331,6 +376,8 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
                     .collect::<Vec<_>>();
                 d.delete_pages(&remove);
                 d.prune_objects();
+            } else if r.operation == "pdf-rotate" {
+                rotate_pages(&mut d, &r.parameter, &j)?;
             } else {
                 d = if r.operation == "pdf-reorder" {
                     reorder(d, &r.parameter, &j)?
@@ -405,6 +452,52 @@ mod tests {
             .unwrap();
         assert!(xml.contains("# literal"));
         assert!(!xml.contains("outlineLvl"));
+    }
+
+    #[test]
+    fn rotates_only_selected_pages_relative_to_inherited_angle() {
+        let mut doc = Document::load("tests/fixtures/two-pages.pdf").unwrap();
+        let pages = doc.get_pages();
+        let first = pages[&1];
+        let second = pages[&2];
+        for id in [first, second] {
+            doc.get_object_mut(id)
+                .unwrap()
+                .as_dict_mut()
+                .unwrap()
+                .remove(b"Rotate");
+        }
+        let parent = doc
+            .get_dictionary(first)
+            .unwrap()
+            .get(b"Parent")
+            .unwrap()
+            .as_reference()
+            .unwrap();
+        doc.get_object_mut(parent)
+            .unwrap()
+            .as_dict_mut()
+            .unwrap()
+            .set("Rotate", -90);
+        rotate_pages(&mut doc, "2-2,180", &Job::new()).unwrap();
+        assert_eq!(
+            inherited(&doc, first, b"Rotate")
+                .unwrap()
+                .unwrap()
+                .as_i64()
+                .unwrap(),
+            -90
+        );
+        assert_eq!(
+            inherited(&doc, second, b"Rotate")
+                .unwrap()
+                .unwrap()
+                .as_i64()
+                .unwrap(),
+            90
+        );
+        assert!(rotate_pages(&mut doc, "0-2,90", &Job::new()).is_err());
+        assert!(rotate_pages(&mut doc, "1-2,45", &Job::new()).is_err());
     }
 
     #[test]
