@@ -547,6 +547,7 @@ dependencies = [
  "localwright-ui",
  "lopdf",
  "serde_json",
+ "sha2",
  "tempfile",
  "zip",
 ]

@@ -1,13 +1,18 @@
 #![forbid(unsafe_code)]
+#[cfg(feature = "ocr")]
+mod ocr;
 use localwright_core::*;
 use lopdf::{dictionary, Document, Object};
 use std::{io::Write, path::Path};
 use zip::{write::SimpleFileOptions, ZipWriter};
 pub const OPERATIONS:&[Operation]=&[
  Operation{id:"markdown-docx",label:"Markdown to DOCX",hint:"Basic headings and plain paragraphs only. Choose new .docx output."},
+ Operation{id:"pdf-info",label:"PDF information",hint:"Show the PDF version and page count. Optional new JSON output."},
  Operation{id:"pdf-text",label:"PDF text",hint:"Extract text from PDF text layer. Optional new .txt output. No OCR."},
  Operation{id:"pdf-split",label:"PDF page range",hint:"Parameter inclusive page range, e.g. 2-4. New .pdf output. Experimental; not sanitization."},
- Operation{id:"pdf-merge",label:"Merge PDFs",hint:"Input first PDF; parameter second PDF path. New .pdf output. Experimental page-only merge."}];
+ Operation{id:"pdf-merge",label:"Merge PDFs",hint:"Input first PDF; parameter second PDF path. New .pdf output. Experimental page-only merge."},
+ #[cfg(feature="ocr")]
+ Operation{id:"ocr-png",label:"Experimental PNG OCR",hint:"Recognize English text using the private OCR pack. Optional new .txt output."}];
 fn err(e: impl std::fmt::Display) -> Error {
     Error::input(e.to_string())
 }
@@ -174,6 +179,37 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
             written = Some(r.output);
             warnings.push("Only ATX headings and literal paragraphs; inline markup, tables, images and layout are not interpreted.".into());
             "Created basic DOCX".into()
+        }
+        #[cfg(feature = "ocr")]
+        "ocr-png" => {
+            if !r.output.as_os_str().is_empty() {
+                extension(&r.output, "txt")?;
+            }
+            let recognized = ocr::recognize(&r.input, &j)?;
+            if !r.output.as_os_str().is_empty() {
+                j.check()?;
+                write_bytes(&r.output, recognized.as_bytes())?;
+                written = Some(r.output);
+            }
+            warnings.push(
+                "Experimental English OCR. Review the recognized text against the original.".into(),
+            );
+            recognized.chars().take(24000).collect()
+        }
+        "pdf-info" => {
+            let document = load(&r.input)?;
+            let report = serde_json::to_string_pretty(&serde_json::json!({
+                "schema_version": 1,
+                "pdf_version": document.version,
+                "pages": document.get_pages().len(),
+            }))?;
+            if !r.output.as_os_str().is_empty() {
+                extension(&r.output, "json")?;
+                j.check()?;
+                write_bytes(&r.output, report.as_bytes())?;
+                written = Some(r.output);
+            }
+            report
         }
         "pdf-text" => {
             let d = load(&r.input)?;
