@@ -10,6 +10,7 @@ Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_
 | pdf-info | PDF version and page count; optional JSON | Linux fixture-tested |
 | pdf-text | PDF text-layer extraction | Linux fixture-tested |
 | pdf-split | Experimental page range | Linux fixture-tested |
+| pdf-reorder | Experimental page-only PDF reordering | implemented-unverified |
 | pdf-merge | Experimental two-document page-only merge | Linux fixture-tested |
 
 ## Known gaps

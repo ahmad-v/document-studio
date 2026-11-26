@@ -11,6 +11,7 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"pdf-info",label:"PDF information",hint:"Show the PDF version and page count. Optional new JSON output."},
  Operation{id:"pdf-text",label:"PDF text",hint:"Extract text from PDF text layer. Optional new .txt output. No OCR."},
  Operation{id:"pdf-split",label:"PDF page range",hint:"Parameter inclusive page range, e.g. 2-4. New .pdf output. Experimental; not sanitization."},
+ Operation{id:"pdf-reorder",label:"Reorder PDF pages",hint:"Enter every page once, in the desired order, e.g. 3,1,2. Choose a new .pdf output."},
  Operation{id:"pdf-merge",label:"Merge PDFs",hint:"Input first PDF; parameter second PDF path. New .pdf output. Experimental page-only merge."},
  #[cfg(feature="ocr")]
  Operation{id:"ocr-png",label:"Experimental PNG OCR",hint:"Recognize English text using the private OCR pack. Optional new .txt output."}];
@@ -129,10 +130,38 @@ fn merge(mut a: Document, mut b: Document, j: &Job) -> Result<Document> {
             .checked_add(1)
             .ok_or_else(|| Error::input("Object ID overflow"))?,
     );
-    let mut out = Document::with_version("1.7");
+    let a_order = a.get_pages().into_values().collect();
+    let b_order = b.get_pages().into_values().collect();
+    rebuild_pages([(a, a_order), (b, b_order)], "1.7", j)
+}
+
+fn reorder(d: Document, order: &str, j: &Job) -> Result<Document> {
+    let mut remaining = d.get_pages();
+    let mut ids = Vec::with_capacity(remaining.len());
+    for entry in order.split(',') {
+        j.check()?;
+        let page = entry.trim().parse::<u32>().map_err(err)?;
+        let id = remaining
+            .remove(&page)
+            .ok_or_else(|| Error::input(format!("Page {page} is repeated or out of range")))?;
+        ids.push(id);
+    }
+    if !remaining.is_empty() {
+        return Err(Error::input("The order must include every page"));
+    }
+    let version = d.version.clone();
+    rebuild_pages([(d, ids)], &version, j)
+}
+
+fn rebuild_pages(
+    sources: impl IntoIterator<Item = (Document, Vec<lopdf::ObjectId>)>,
+    version: &str,
+    j: &Job,
+) -> Result<Document> {
+    let mut out = Document::with_version(version);
     let mut ids = vec![];
-    for mut d in [a, b] {
-        for (_, id) in d.get_pages() {
+    for (mut d, order) in sources {
+        for id in order {
             j.check()?;
             let attrs = [b"Resources".as_slice(), b"MediaBox", b"CropBox", b"Rotate"]
                 .iter()
@@ -147,7 +176,8 @@ fn merge(mut a: Document, mut b: Document, j: &Job) -> Result<Document> {
                 if let Some(v) = v {
                     page.set(k, v);
                 }
-            } // Drop interactive annotations from merged pages; this is not redaction.
+            }
+            // Drop interactive annotations when rebuilding the page tree.
             page.remove(b"Annots");
             page.remove(b"AA");
             ids.push(id);
@@ -237,7 +267,7 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
             );
             s.chars().take(24000).collect()
         }
-        "pdf-split" | "pdf-merge" => {
+        "pdf-split" | "pdf-merge" | "pdf-reorder" => {
             extension(&r.output, "pdf")?;
             let mut d = load(&r.input)?;
             if r.operation == "pdf-split" {
@@ -258,7 +288,15 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
                 d.delete_pages(&remove);
                 d.prune_objects();
             } else {
-                d = merge(d, load(Path::new(&r.parameter))?, &j)?;
+                d = if r.operation == "pdf-reorder" {
+                    reorder(d, &r.parameter, &j)?
+                } else {
+                    merge(d, load(Path::new(&r.parameter))?, &j)?
+                };
+                warnings.push(
+                    "Page-only output omits annotations, bookmarks, forms and document metadata."
+                        .into(),
+                );
             }
             let count = d.get_pages().len();
             j.check()?;
@@ -323,6 +361,56 @@ mod tests {
             .unwrap();
         assert!(xml.contains("# literal"));
         assert!(!xml.contains("outlineLvl"));
+    }
+
+    #[test]
+    fn reorder_preserves_page_order_and_inherited_dimensions() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input.pdf");
+        let output = dir.path().join("output.pdf");
+        let mut document = Document::with_version("1.7");
+        let parent = document.new_object_id();
+        let first = document.add_object(dictionary! {"Type" => "Page", "Parent" => parent});
+        let second =
+            document.add_object(dictionary! {"Type" => "Page", "Parent" => parent, "Rotate" => 90});
+        document.objects.insert(
+            parent,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(first), Object::Reference(second)],
+                "Count" => 2,
+                "MediaBox" => vec![Object::Integer(0), 0.into(), 200.into(), 300.into()],
+            }),
+        );
+        let root = document.add_object(dictionary! {"Type" => "Catalog", "Pages" => parent});
+        document.trailer.set("Root", root);
+        document.save(&input).unwrap();
+        let request = |parameter: &str| Request {
+            operation: "pdf-reorder".into(),
+            input: input.clone(),
+            output: output.clone(),
+            parameter: parameter.into(),
+            ..Request::default()
+        };
+        for invalid in ["1", "1,1", "0,2", "1,3", "1,2,"] {
+            assert!(handle(request(invalid), Job::new()).is_err());
+            assert!(!output.exists());
+        }
+        handle(request("2, 1"), Job::new()).unwrap();
+        let result = load(&output).unwrap();
+        let pages = result.get_pages();
+        assert_eq!(pages.len(), 2);
+        let first = result.get_dictionary(pages[&1]).unwrap();
+        let second = result.get_dictionary(pages[&2]).unwrap();
+        assert_eq!(first.get(b"Rotate").unwrap().as_i64().unwrap(), 90);
+        assert!(second.get(b"Rotate").is_err());
+        for page in [first, second] {
+            assert_eq!(
+                page.get(b"MediaBox").unwrap().as_array().unwrap(),
+                &vec![Object::Integer(0), 0.into(), 200.into(), 300.into()]
+            );
+        }
+        assert!(handle(request("1,2"), Job::new()).is_err());
     }
 
     #[test]

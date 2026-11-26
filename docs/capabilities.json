@@ -49,6 +49,13 @@
       "fixture_status": "not run"
     },
     {
+      "operation": "pdf-reorder",
+      "description": "Experimental page-only PDF reordering",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "pending compilation"
+    },
+    {
       "operation": "pdf-merge",
       "description": "Experimental two-document page-only merge",
       "status": "implemented-unverified",

@@ -8,6 +8,7 @@ Development source only. Launch the GUI after compiling. Choose an operation, en
 - `pdf-info` reports the PDF version and page count with optional JSON output.
 - `pdf-text`: PDF text-layer extraction.
 - `pdf-split`: Experimental page range.
+- `pdf-reorder` writes a new PDF using the requested page order. Enter every page once, for example `--cli pdf-reorder input.pdf reordered.pdf 3,1,2`. The output omits annotations, bookmarks, forms and document metadata.
 - `pdf-merge`: Experimental two-document page-only merge.
 
 Limitations: Basic DOCX only; inline Markdown and layout omitted. PDF parsing and decompression limits are incomplete, active content can survive split/merge, and these operations are not redaction or sanitization. Page-only merge drops page annotations, document-level metadata/bookmarks/forms, and may lose inherited or unusual structures; no independent reader validation yet. No OCR, PDF renderer, Office fidelity, legacy converters or comparison.
