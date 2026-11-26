@@ -39,3 +39,5 @@ On Debian 13.7 with glibc 2.41, the staged engine recognized `LOCAL DOCUMENT OCR
 | `DOCUMENT_OCR_TESSERACT_SHA256` | `daee7207c0e56228102d5db02287d0f95f5a2bdd034d199a2b4ccf1f9a055ccd` |
 | `DOCUMENT_OCR_ENGLISH_SHA256` | `7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2` |
 | `DOCUMENT_OCR_LIBRARIES_SHA256` | `74aec2b6c155dc6de784f7bcb761fc6d6badd76eea036eff2d1fd8e952fc367e` |
+
+The Linux x86_64 Document Studio CLI was built with `ocr` and all three candidate pins. From a fresh application staging directory it recognized the synthetic PNG through the source-built pack and wrote the expected text to a new output. The traced app and child made no socket or connect calls while socket creation was blocked. This validates the app-relative route on the build host. Clean-device and installer evidence remain open.

@@ -21,6 +21,13 @@
       "fixture_status": "Linux x64 smoke passed"
     },
     {
+      "operation": "compare-text",
+      "description": "UTF-8 line changes with optional text report",
+      "status": "implemented-unverified",
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "fixture_status": "Linux x86_64 integration fixture passed"
+    },
+    {
       "operation": "pdf-info",
       "description": "PDF version and page count; optional JSON",
       "status": "implemented-unverified",
@@ -52,8 +59,8 @@
       "operation": "pdf-reorder",
       "description": "Experimental page-only PDF reordering",
       "status": "implemented-unverified",
-      "targets": [],
-      "fixture_status": "pending compilation"
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "fixture_status": "Linux x86_64 integration fixture passed"
     },
     {
       "operation": "pdf-merge",

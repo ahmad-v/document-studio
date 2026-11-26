@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+mod compare;
 #[cfg(feature = "ocr")]
 mod ocr;
 use localwright_core::*;
@@ -8,6 +9,7 @@ use zip::{write::SimpleFileOptions, ZipWriter};
 pub const OPERATIONS:&[Operation]=&[
  Operation{id:"markdown-docx",label:"Markdown to DOCX",hint:"Basic headings and plain paragraphs only. Choose new .docx output."},
  Operation{id:"text-docx",label:"Plain text to DOCX",hint:"Convert UTF-8 text to literal DOCX paragraphs. Choose a new .docx output."},
+ Operation{id:"compare-text",label:"Compare text files",hint:"Enter the second UTF-8 text file path as the parameter. Optional new .txt report."},
  Operation{id:"pdf-info",label:"PDF information",hint:"Show the PDF version and page count. Optional new JSON output."},
  Operation{id:"pdf-text",label:"PDF text",hint:"Extract text from PDF text layer. Optional new .txt output. No OCR."},
  Operation{id:"pdf-split",label:"PDF page range",hint:"Parameter inclusive page range, e.g. 2-4. New .pdf output. Experimental; not sanitization."},
@@ -230,6 +232,20 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
                 "Experimental English OCR. Review the recognized text against the original.".into(),
             );
             recognized.chars().take(24000).collect()
+        }
+        "compare-text" => {
+            let report = compare::compare(&r.input, Path::new(&r.parameter), &j)?;
+            if !r.output.as_os_str().is_empty() {
+                extension(&r.output, "txt")?;
+                j.check()?;
+                write_bytes(&r.output, report.as_bytes())?;
+                written = Some(r.output);
+            }
+            let mut preview = report.chars().take(24000).collect::<String>();
+            if preview.len() < report.len() {
+                preview.push_str("\n[Preview truncated. Save a report to see all changes.]");
+            }
+            preview
         }
         "pdf-info" => {
             let document = load(&r.input)?;
