@@ -1,16 +1,16 @@
 # Status | 0.1.0-alpha.1
 
-M0 complete as source planning; partial M1 implementation, not verified. All five repos created locally as source trees only. No remote resources created.
+Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_64.
 
 | Operation | Scope | Status |
 |---|---|---|
-| markdown-docx | Basic ATX headings and literal paragraphs to DOCX | implemented-unverified |
-| pdf-text | PDF text-layer extraction | implemented-unverified |
-| pdf-split | Experimental page range | implemented-unverified |
-| pdf-merge | Experimental two-document page-only merge | implemented-unverified |
+| markdown-docx | Basic ATX headings and literal paragraphs to DOCX | Linux fixture-tested |
+| pdf-text | PDF text-layer extraction | Linux fixture-tested |
+| pdf-split | Experimental page range | Linux fixture-tested |
+| pdf-merge | Experimental two-document page-only merge | Linux fixture-tested |
 
 ## Known gaps
 
-Basic DOCX only; inline Markdown and layout omitted. PDF parsing and decompression limits are incomplete, active content can survive split/merge, and these operations are not redaction or sanitization. Page-only merge drops page annotations, document-level metadata/bookmarks/forms, and may lose inherited or unusual structures; no independent reader validation yet. No OCR, PDF renderer, Office fidelity, legacy converters or comparison.
+Basic DOCX only; inline Markdown and layout omitted. PDF parsing and decompression limits are incomplete, active content can survive split/merge, and these operations are not redaction or sanitization. Page-only merge drops page annotations, document-level metadata/bookmarks/forms, and may lose inherited or unusual structures. No OCR, PDF renderer, Office fidelity, legacy converters or comparison.
 
-Cargo and rustc absent; registry and distribution DNS failed. No lockfile, compilation, rustfmt, clippy, Rust tests, GUI/device tests, package builds or security audit performed. All five platform builds blocked pending CI. See MASTER_SPECIFICATION.md for authoritative acceptance gates.
+Hosted matrix, device, and packaging verification remain open. See [verification evidence](VERIFICATION.md) and [dependency review](DEPENDENCIES.md).
