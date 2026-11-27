@@ -29,7 +29,7 @@ jobs:
       - name: Install Linux GUI build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libwayland-dev
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev xvfb
       - name: Cache Cargo dependencies and target output
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
@@ -48,9 +48,26 @@ jobs:
           git diff --check
       - name: Verify default GUI build and tests
         run: |
-          cargo check --locked --all-targets
+          cargo build --locked --bin document-studio
           cargo test --locked
           cargo clippy --locked --all-targets -- -D warnings
+      - name: Smoke-test native GUI startup under Xvfb
+        run: |
+          log_file="$(mktemp)"
+          set +e
+          xvfb-run -a timeout --signal=TERM --kill-after=5s 20s target/debug/document-studio >"$log_file" 2>&1
+          status=$?
+          set -e
+          cat "$log_file"
+          if grep -Eiq 'panicked at|thread .* panicked|panic occurred' "$log_file"; then
+            echo "The GUI process reported a panic." >&2
+            exit 1
+          fi
+          rm -f "$log_file"
+          case "$status" in
+            0|124|143) ;;
+            *) echo "GUI startup smoke failed with exit status $status." >&2; exit "$status" ;;
+          esac
       - name: Verify headless build and CLI
         run: |
           cargo test --locked --no-default-features
