@@ -310,7 +310,9 @@ impl Viewer {
             Message::Next if !self.loading && self.page < self.pages => {
                 return self.request_page(self.page + 1);
             }
-            Message::SelectPage(page) if !self.loading => return self.request_page(page),
+            Message::SelectPage(page) if !self.loading && page != self.page => {
+                return self.request_page(page);
+            }
             Message::PageInput(value) => self.page_input = value,
             Message::GoToPage if !self.loading => {
                 if let Some(page) = parse_page_selection(&self.page_input, self.pages) {
@@ -418,29 +420,38 @@ impl Viewer {
         };
         let mut thumbnails = row![].spacing(8).align_y(iced::Alignment::Center);
         for page in page_window(self.page, self.pages) {
+            let selected = page == self.page;
+            let label = if selected {
+                format!("Page {page}, current")
+            } else {
+                format!("Page {page}")
+            };
             let item: Element<'_, Message> = if let Some(handle) = self.thumbnails.peek(page) {
                 let thumb = image(handle.clone())
                     .content_fit(ContentFit::Contain)
                     .width(Length::Fixed(96.0))
                     .height(Length::Fixed(112.0));
-                let selected = button(
-                    column![thumb, text(format!("Page {page}"))].align_x(iced::Alignment::Center),
-                );
-                if !self.loading && page != self.page {
-                    selected.on_press(Message::SelectPage(page)).into()
-                } else {
-                    selected.into()
-                }
+                button(column![thumb, text(label)].align_x(iced::Alignment::Center))
+                    .style(if selected {
+                        button::primary
+                    } else {
+                        button::secondary
+                    })
+                    .on_press_maybe((!self.loading).then_some(Message::SelectPage(page)))
+                    .into()
             } else {
                 button(
-                    column![text("Preview"), text(format!("Page {page}"))]
+                    column![text("Preview"), text(label)]
                         .width(Length::Fixed(96.0))
                         .height(Length::Fixed(112.0))
                         .align_x(iced::Alignment::Center),
                 )
-                .on_press_maybe(
-                    (!self.loading && page != self.page).then_some(Message::SelectPage(page)),
-                )
+                .style(if selected {
+                    button::primary
+                } else {
+                    button::secondary
+                })
+                .on_press_maybe((!self.loading).then_some(Message::SelectPage(page)))
                 .into()
             };
             thumbnails = thumbnails.push(item);
