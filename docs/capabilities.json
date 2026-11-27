@@ -40,7 +40,7 @@
     },
     {
       "operation": "ocr-png-pdf",
-      "description": "One-page searchable PDF from PNG with private English OCR",
+      "description": "One-page searchable PDF from PNG using a hash-verified application-private English OCR pack and Localwright EngineRuntime where supported",
       "status": "implemented-unverified",
       "targets": [
         "x86_64-unknown-linux-gnu"
@@ -49,7 +49,7 @@
     },
     {
       "operation": "ocr-png",
-      "description": "Experimental English OCR for PNG with optional verified private engine",
+      "description": "Experimental English PNG OCR with a hash-verified application-private Tesseract pack; uses Localwright EngineRuntime where loader and platform launch requirements permit",
       "status": "implemented-unverified",
       "targets": [
         "x86_64-unknown-linux-gnu"

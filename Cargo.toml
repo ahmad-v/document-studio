@@ -8,8 +8,8 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-localwright-core = { git = "https://github.com/ahmad-v/localwright", rev = "6c73d43a419189c276623c3b083f7ffb208c24a6", version = "=0.1.0" }
-localwright-ui = { git = "https://github.com/ahmad-v/localwright", rev = "6c73d43a419189c276623c3b083f7ffb208c24a6", version = "=0.1.0", optional = true }
+localwright-core = { git = "https://github.com/ahmad-v/localwright", rev = "33b9af051960aca693ab92cc3a6dbd63c32baacb", version = "=0.1.0" }
+localwright-ui = { git = "https://github.com/ahmad-v/localwright", rev = "33b9af051960aca693ab92cc3a6dbd63c32baacb", version = "=0.1.0", optional = true }
 serde_json = "=1.0.140"
 sha2 = { version = "=0.10.9", optional = true }
 tempfile = { version = "=3.19.1", optional = true }
