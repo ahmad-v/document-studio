@@ -855,6 +855,24 @@ mod tests {
                 &vec![Object::Integer(0), 0.into(), 200.into(), 300.into()]
             );
         }
+        let original = load(&input).unwrap();
+        let original_pages = original.get_pages();
+        assert_eq!(original_pages.len(), 2);
+        assert!(original
+            .get_dictionary(original_pages[&1])
+            .unwrap()
+            .get(b"Rotate")
+            .is_err());
+        assert_eq!(
+            original
+                .get_dictionary(original_pages[&2])
+                .unwrap()
+                .get(b"Rotate")
+                .unwrap()
+                .as_i64()
+                .unwrap(),
+            90
+        );
         assert!(handle(request("1,2"), Job::new()).is_err());
     }
 
