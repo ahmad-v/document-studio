@@ -564,7 +564,7 @@ impl Viewer {
                             .await
                             .map(|file| file.path().to_path_buf())
                     },
-                    move |second| Message::MergeInputChosen(source, second),
+                    move |second| Message::MergeInputChosen(source.clone(), second),
                 );
             }
             Message::MergeInputChosen(source, Some(second))
