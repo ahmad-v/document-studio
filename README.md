@@ -1,24 +1,21 @@
 # Document Studio
 
-Local document interchange. This is a development snapshot (0.1.0-alpha.1), not a verified release or installer.
+Document Studio is an offline-first native document utility and an unverified development snapshot (`0.1.0-alpha.1`). It is one of four independent studios built on the reusable Localwright toolkit.
 
-This independent studio uses Localwright at source level. There is no separate mandatory Localwright installation.
+## Current capabilities
 
-## What is in this snapshot
+The application includes experimental PDF inspection, text extraction and page operations; basic Markdown/plain-text DOCX generation and DOCX body-text extraction; bounded text comparison; CSL JSON validation and CSL JSON/RIS/BibTeX interchange; and optional Linux-focused private Tesseract OCR routes. The OCR build does not include an engine or language pack by default. See [the manual](docs/MANUAL.md) and [capability registry](docs/capabilities.json) for the exact routes and limits.
 
-- Basic ATX headings and literal paragraphs to DOCX (implemented-unverified).
-- PDF text-layer extraction (implemented-unverified).
-- Experimental page range (implemented-unverified).
-- Experimental two-document page-only merge (implemented-unverified).
+Most operations have Linux x86_64 fixture or CLI evidence. The current source still lacks native PDF page rendering, mature document conversion, structural/visual comparison, EPUB support, and installed-device acceptance. PDF structural edits are not redaction or sanitization and may omit annotations, metadata, bookmarks, forms, or unusual structures.
 
-The project is intended to remain free, local and offline, without tracking, advertising, subscriptions or premium features. See [the manifesto](MANIFESTO.md) for the motivation behind it.
+## Development and verification
 
-## Development
+Rust 1.88.0 is pinned in `rust-toolchain.toml`. Run `cargo fmt --all -- --check`, `cargo check --locked --all-targets`, `cargo test --locked`, and `cargo clippy --locked --all-targets -- -D warnings` for the default GUI build. The [build notes](docs/BUILD.md) describe CI workflow levels.
 
-See [build notes](docs/BUILD.md), [status](docs/STATUS.md), [architecture](docs/ARCHITECTURE.md) and [manual](docs/MANUAL.md). The complete [master specification](MASTER_SPECIFICATION.md) defines the remaining requirements. No compilation, platform support or package has been verified in this snapshot.
+Ordinary `Check` runs use Linux x64 and skip Rust builds for documentation-only changes while preserving the required `Check / Rust (ubuntu-24.04)` result. Label a pull request `integration` for Linux GUI/headless and OCR-adapter checks, or `platform-validation` for the five native target matrix. Distribution preparation is manual. The package matrix remains gated because the provisional application identity and maintainer are unapproved; an unsigned portable preview can be manually prepared without that identity. The weekly/manual security workflow audits Rust advisories and emits a CycloneDX SBOM plus a review-only license metadata inventory.
 
-## Citation and contributions
+See [status](docs/STATUS.md), [verification evidence](docs/VERIFICATION.md), [dependency notes](docs/DEPENDENCIES.md), [architecture](docs/ARCHITECTURE.md), and the [master specification](MASTER_SPECIFICATION.md). This is not a verified release, and the source snapshot does not provide installers or a complete offline OCR engine pack.
 
-If the software is useful in your research, please consider citing its version once a verified release and actual repository URL exist. See `CITATION.cff`. No DOI has been assigned. Code, testing, translations and documentation are welcome. No donation account has been configured.
+## Project principles
 
-Original code candidate license: MIT OR Apache-2.0, pending maintainer approval and dependency review. AI-assisted source requires human review before publication.
+The project is intended to remain free, local and private, without tracking, advertising, subscriptions or premium features. Original code is a candidate for MIT OR Apache-2.0, pending maintainer approval and dependency review. No DOI or donation account has been configured. See the [manifesto](MANIFESTO.md) and [contribution guide](CONTRIBUTING.md).

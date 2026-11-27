@@ -1,0 +1,85 @@
+name: Native platform verification
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: native-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Rust (${{ matrix.runner }})
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'platform-validation')
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            arch: X64
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            arch: ARM64
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            arch: X64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            arch: ARM64
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            arch: ARM64
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify runner architecture
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: test "$RUNNER_ARCH" = "$EXPECTED_ARCH"
+      - name: Install Linux GUI build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev
+      - name: Cache Cargo dependencies and target output
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            target
+          key: document-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ hashFiles('rust-toolchain.toml') }}-native-default-ocr-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            document-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-${{ hashFiles('rust-toolchain.toml') }}-native-default-ocr-
+      - name: Verify locked manifests and operation registry
+        run: |
+          cargo metadata --locked --format-version 1 --no-deps >/dev/null
+          python3 -m json.tool docs/capabilities.json >/dev/null
+          git diff --check
+      - name: Verify native GUI build and tests
+        run: |
+          cargo check --locked --all-targets
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
+      - name: Verify headless build and CLI
+        run: |
+          cargo test --locked --no-default-features
+          cargo run --locked --no-default-features -- --cli --help
+      - name: Verify OCR adapter on native target
+        run: |
+          cargo check --locked --features ocr --all-targets
+          cargo test --locked --features ocr
