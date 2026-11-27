@@ -778,6 +778,37 @@ mod tests {
     }
 
     #[test]
+    fn pdf_single_page_extraction_writes_new_output_and_preserves_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let input = Path::new("tests/fixtures/two-pages.pdf").to_path_buf();
+        let output = directory.path().join("page-two.pdf");
+        handle(
+            Request {
+                operation: "pdf-split".into(),
+                input: input.clone(),
+                output: output.clone(),
+                parameter: "2-2".into(),
+                ..Request::default()
+            },
+            Job::new(),
+        )
+        .unwrap();
+        assert_eq!(load(&input).unwrap().get_pages().len(), 2);
+        assert_eq!(load(&output).unwrap().get_pages().len(), 1);
+        assert!(handle(
+            Request {
+                operation: "pdf-split".into(),
+                input,
+                output,
+                parameter: "1-1".into(),
+                ..Request::default()
+            },
+            Job::new(),
+        )
+        .is_err());
+    }
+
+    #[test]
     fn reorder_preserves_page_order_and_inherited_dimensions() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("input.pdf");

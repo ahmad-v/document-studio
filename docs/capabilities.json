@@ -88,7 +88,7 @@
       "targets": [
         "x86_64-unknown-linux-gnu"
       ],
-      "fixture_status": "Synthetic two-page fixture rendered and decoded at 200x300; page 1 black content and page 2 white content verified; page selection and invalid-page refusal passed. GUI window/platform integration pending."
+      "fixture_status": "Synthetic two-page fixture rendered and decoded at 200x300; page selection and invalid-page refusal passed. Native open, session recents and selected-page extraction are implemented; current GUI and five-target verification pending."
     },
     {
       "operation": "markdown-docx",
