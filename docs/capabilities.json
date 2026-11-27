@@ -82,6 +82,15 @@
       "fixture_status": "Linux fixture passed"
     },
     {
+      "operation": "pdf-preview",
+      "description": "Render a selected PDF page to a bounded PNG and open the native page navigation and zoom workspace",
+      "status": "implemented-unverified",
+      "targets": [
+        "x86_64-unknown-linux-gnu"
+      ],
+      "fixture_status": "Synthetic two-page fixture rendered and decoded at 200x300; page 1 black content and page 2 white content verified; page selection and invalid-page refusal passed. GUI window/platform integration pending."
+    },
+    {
       "operation": "markdown-docx",
       "description": "Basic ATX headings and literal paragraphs to DOCX",
       "status": "implemented-unverified",

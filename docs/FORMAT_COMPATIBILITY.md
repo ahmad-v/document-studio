@@ -5,6 +5,7 @@ Nothing is verified on a native target. The machine-readable registry is a devel
 | Operation | Route | Evidence status |
 |---|---|---|
 | pdf-rotate | Rotate a selected page range clockwise relative to existing rotation | Linux fixture and CLI-tested |
+| pdf-preview | Render one bounded PDF page to PNG; native paginated viewer | Synthetic two-page fixture and pixels tested; GUI/platform verification pending |
 | markdown-docx | Basic ATX headings and literal paragraphs to DOCX | implemented-unverified |
 | ocr-png-pdf | One-page searchable PDF from a PNG with optional private OCR | Linux x86_64 CLI and independent reader smoke-tested |
 | docx-text | UTF-8 WordprocessingML main-body plain text | Linux fixture and independent reader-tested |

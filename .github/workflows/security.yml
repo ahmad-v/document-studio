@@ -1,0 +1,94 @@
+name: Dependency security and inventory
+
+on:
+  schedule:
+    - cron: '31 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  advisory-audit:
+    name: RustSec advisory audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Cache audit tooling
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-audit
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            target
+          key: document-security-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-cargo-audit-0.23.0-${{ hashFiles('Cargo.lock') }}
+      - name: Install pinned cargo-audit if not cached
+        run: |
+          if ! command -v cargo-audit >/dev/null 2>&1; then
+            cargo install --locked --version 0.23.0 cargo-audit
+          fi
+      - name: Audit committed lockfile
+        run: |
+          mkdir -p target/security-inventory
+          cargo audit --file Cargo.lock --format json > target/security-inventory/cargo-audit.json
+
+  dependency-inventory:
+    name: License metadata and CycloneDX SBOM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Cache SBOM tooling and Cargo dependencies
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-cyclonedx
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            target
+          key: document-security-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-cyclonedx-0.5.10-all-features-${{ hashFiles('Cargo.lock') }}
+      - name: Install pinned CycloneDX Cargo tool if not cached
+        run: |
+          if ! command -v cargo-cyclonedx >/dev/null 2>&1; then
+            cargo install --locked --version 0.5.10 cargo-cyclonedx
+          fi
+      - name: Generate complete locked dependency license metadata
+        run: |
+          mkdir -p target/security-inventory
+          cargo metadata --locked --all-features --format-version 1 > target/security-inventory/cargo-metadata.json
+          python3 scripts/license_inventory.py \
+            target/security-inventory/cargo-metadata.json \
+            target/security-inventory/dependency-license-inventory.json
+      - name: Generate CycloneDX SBOM
+        run: |
+          cargo cyclonedx \
+            --manifest-path Cargo.toml \
+            --format json \
+            --spec-version 1.5 \
+            --all-features \
+            --target all \
+            --override-filename target/security-inventory/document-studio-sbom.cdx.json
+          python3 -m json.tool target/security-inventory/document-studio-sbom.cdx.json >/dev/null
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: document-studio-security-inventory-${{ github.run_id }}
+          path: target/security-inventory/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6

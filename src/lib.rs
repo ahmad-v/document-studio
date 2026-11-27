@@ -4,8 +4,15 @@ mod compare;
 mod docx_text;
 #[cfg(feature = "ocr")]
 mod ocr;
+#[cfg(feature = "gui")]
+mod pdf_viewer;
+mod pdf_workspace;
 use localwright_core::*;
 use lopdf::{dictionary, Document, Object};
+use pdf_workspace::{
+    document_within_limits, MAX_DOCUMENT_BYTES, PREVIEW_MAX_EDGE, PREVIEW_MAX_PIXELS,
+    THUMBNAIL_MAX_EDGE, VISIBLE_THUMBNAILS,
+};
 use std::{io::Write, path::Path};
 use zip::{write::SimpleFileOptions, ZipWriter};
 pub const OPERATIONS:&[Operation]=&[
@@ -16,6 +23,7 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"citation-convert",label:"Convert citation records",hint:"Parameter format pair: csl-json->ris, ris->csl-json, csl-json->bibtex, or ris->bibtex. Choose a new output with .json, .ris, or .bib extension."},
  Operation{id:"citation-validate",label:"Validate CSL JSON bibliography",hint:"Validate one CSL JSON object or array (up to 10,000 records). Optional new .json report."},
  Operation{id:"pdf-info",label:"PDF information",hint:"Show the PDF version and page count. Optional new JSON output."},
+ Operation{id:"pdf-preview",label:"Render PDF page preview",hint:"Render one 1-based page to a bounded PNG. Enter the page number (default 1) and choose a new .png output. Raster preview only; rendering fidelity and unsupported PDF features may vary."},
  Operation{id:"pdf-text",label:"PDF text",hint:"Extract text from PDF text layer. Optional new .txt output. No OCR."},
  Operation{id:"pdf-split",label:"PDF page range",hint:"Parameter inclusive page range, e.g. 2-4. New .pdf output. Experimental; not sanitization."},
  Operation{id:"pdf-rotate",label:"Rotate PDF pages",hint:"Enter start-end,degrees, e.g. 2-4,90. Use 90, 180 or 270 clockwise. Choose a new PDF."},
@@ -99,15 +107,180 @@ fn docx(p: &Path, source: &str, markdown: bool, j: &Job) -> Result<()> {
     })
 }
 fn load(p: &Path) -> Result<Document> {
-    let bytes = read_bounded(p, 32 * 1024 * 1024)?;
-    let d = Document::load_mem(&bytes).map_err(err)?;
+    let bytes = read_bounded(p, MAX_DOCUMENT_BYTES)?;
+    load_pdf_bytes(&bytes)
+}
+fn load_pdf_bytes(bytes: &[u8]) -> Result<Document> {
+    let d = Document::load_mem(bytes).map_err(err)?;
     if d.is_encrypted() {
         return Err(Error::input("Encrypted PDF not supported"));
     }
-    if d.get_pages().len() > 1000 || d.objects.len() > 100000 {
+    if !document_within_limits(bytes.len() as u64, d.get_pages().len(), d.objects.len()) {
         return Err(Error::input("PDF object or page limit exceeded"));
     }
     Ok(d)
+}
+
+#[derive(Debug)]
+pub(crate) struct PagePixels {
+    pub(crate) page: usize,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) pixels: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ViewerBatch {
+    pub(crate) page_count: usize,
+    pub(crate) preview: PagePixels,
+    pub(crate) thumbnails: Vec<PagePixels>,
+}
+
+fn render_page_bitmap(
+    page: &hayro::hayro_syntax::page::Page<'_>,
+    page_number: usize,
+    max_edge: u16,
+    job: &Job,
+) -> Result<PagePixels> {
+    let (page_width, page_height) = page.render_dimensions();
+    let page_area = page_width * page_height;
+    if !page_width.is_finite()
+        || !page_height.is_finite()
+        || !page_area.is_finite()
+        || page_width <= 0.0
+        || page_height <= 0.0
+        || page_area <= 0.0
+    {
+        return Err(Error::input("PDF page has invalid render dimensions"));
+    }
+    let edge = f32::from(max_edge.max(1).min(PREVIEW_MAX_EDGE as u16));
+    let max_pixels = PREVIEW_MAX_PIXELS.min(u32::from(max_edge.max(1)).pow(2));
+    let pixel_scale = (edge / page_width.max(page_height))
+        .min((max_pixels as f32 / page_area).sqrt())
+        .min(1.0);
+    let width = (page_width * pixel_scale).round().clamp(1.0, edge) as u16;
+    let height = (page_height * pixel_scale).round().clamp(1.0, edge) as u16;
+    if u32::from(width) * u32::from(height) > max_pixels {
+        return Err(Error::input("Rendered preview exceeds the pixel budget"));
+    }
+    job.check()?;
+    let pixmap = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        hayro::render(
+            page,
+            &hayro::RenderCache::new(),
+            &hayro::hayro_interpret::InterpreterSettings::default(),
+            &hayro::RenderSettings::default(),
+            &hayro::PixmapSettings {
+                x_scale: pixel_scale,
+                y_scale: pixel_scale,
+                bg_color: hayro::vello_cpu::color::palette::css::WHITE,
+            },
+        )
+    }))
+    .map_err(|_| Error::engine("PDF renderer rejected the page while rendering"))?;
+    job.check()?;
+    let width = u32::from(pixmap.width());
+    let height = u32::from(pixmap.height());
+    if width * height > max_pixels {
+        return Err(Error::engine(
+            "PDF renderer exceeded the preview pixel budget",
+        ));
+    }
+    Ok(PagePixels {
+        page: page_number,
+        width,
+        height,
+        pixels: pixmap.data_as_u8_slice().to_vec(),
+    })
+}
+
+pub(crate) fn render_viewer_batch(
+    path: &Path,
+    page_number: usize,
+    thumbnail_pages: &[usize],
+    job: &Job,
+) -> Result<ViewerBatch> {
+    if thumbnail_pages.len() > VISIBLE_THUMBNAILS {
+        return Err(Error::input(
+            "Thumbnail batch exceeds the bounded page window",
+        ));
+    }
+    let bytes = read_bounded(path, MAX_DOCUMENT_BYTES)?;
+    let document =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_pdf_bytes(&bytes)))
+            .map_err(|_| {
+                Error::input("PDF parser stopped unexpectedly while reading the document")
+            })??;
+    let page_count = document.get_pages().len();
+    if page_number == 0 || page_number > page_count {
+        return Err(Error::input("Choose an existing 1-based PDF page number"));
+    }
+    if thumbnail_pages
+        .iter()
+        .any(|page| *page == 0 || *page > page_count)
+    {
+        return Err(Error::input("Thumbnail page selection is out of range"));
+    }
+    job.check()?;
+    let pdf = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        hayro::hayro_syntax::Pdf::new(bytes)
+    }))
+    .map_err(|_| Error::input("PDF renderer stopped unexpectedly while parsing the document"))?
+    .map_err(|_| Error::input("PDF renderer could not parse the document"))?;
+    let pages = pdf.pages();
+    let page = pages
+        .get(page_number - 1)
+        .ok_or_else(|| Error::input("PDF renderer could not find the requested page"))?;
+    let preview = render_page_bitmap(page, page_number, PREVIEW_MAX_EDGE as u16, job)?;
+    let mut thumbnails = Vec::with_capacity(thumbnail_pages.len());
+    for thumbnail_page in thumbnail_pages {
+        job.check()?;
+        let Some(page) = pages.get(thumbnail_page - 1) else {
+            continue;
+        };
+        if let Ok(thumbnail) = render_page_bitmap(page, *thumbnail_page, THUMBNAIL_MAX_EDGE, job) {
+            thumbnails.push(thumbnail);
+        }
+        job.check()?;
+    }
+    Ok(ViewerBatch {
+        page_count,
+        preview,
+        thumbnails,
+    })
+}
+
+fn render_page_rgba(
+    path: &Path,
+    page_number: usize,
+    job: &Job,
+) -> Result<(u32, u32, Vec<u8>, usize)> {
+    let batch = render_viewer_batch(path, page_number, &[], job)?;
+    Ok((
+        batch.preview.width,
+        batch.preview.height,
+        batch.preview.pixels,
+        batch.page_count,
+    ))
+}
+
+fn render_pdf_preview(path: &Path, page_number: usize, output: &Path, job: &Job) -> Result<String> {
+    extension(output, "png")?;
+    let (width, height, pixels, page_count) = render_page_rgba(path, page_number, job)?;
+    let rgba = image::RgbaImage::from_raw(width, height, pixels)
+        .ok_or_else(|| Error::engine("PDF renderer returned an invalid pixel buffer"))?;
+    write_new(output, |file| {
+        image::DynamicImage::ImageRgba8(rgba)
+            .write_to(file, image::ImageFormat::Png)
+            .map_err(err)
+    })?;
+    Ok(format!("Rendered PDF page {page_number} of {page_count} to {width}×{height} PNG ({PREVIEW_MAX_PIXELS} pixel maximum)"))
+}
+
+/// Open the native Document Studio viewer on a rendered PDF page.
+#[cfg(feature = "gui")]
+pub fn run_pdf_preview(path: &Path, initial_page: usize) -> std::result::Result<(), String> {
+    pdf_viewer::run(path.to_path_buf(), initial_page)
 }
 fn extension(p: &Path, ext: &str) -> Result<()> {
     if p.extension().and_then(|s| s.to_str()) != Some(ext) {
@@ -411,6 +584,39 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
             }
             report
         }
+        "pdf-preview" => {
+            let page_number = if r.parameter.trim().is_empty() {
+                1
+            } else {
+                r.parameter
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| Error::input("Enter a positive 1-based page number"))?
+            };
+            let report = render_pdf_preview(&r.input, page_number, &r.output, &j)?;
+            written = Some(r.output);
+            #[cfg(feature = "gui")]
+            if !cfg!(test) && !std::env::args_os().any(|argument| argument == "--cli") {
+                let launched = std::env::current_exe()
+                    .map_err(|error| error.to_string())
+                    .and_then(|executable| {
+                        std::process::Command::new(executable)
+                            .arg("--preview-pdf")
+                            .arg(&r.input)
+                            .arg(page_number.to_string())
+                            .spawn()
+                            .map(|_| ())
+                            .map_err(|error| error.to_string())
+                    });
+                if let Err(error) = launched {
+                    warnings.push(format!(
+                        "The PNG was saved, but its native preview window could not open: {error}"
+                    ));
+                }
+            }
+            warnings.push("Raster preview only. PDF rendering is incomplete: unsupported blending, transparency groups, annotations, forms, and other PDF features may be missing or differ. This is not a structural edit, redaction, or security review.".into());
+            report
+        }
         "pdf-text" => {
             let d = load(&r.input)?;
             let mut s = String::new();
@@ -619,6 +825,71 @@ mod tests {
             );
         }
         assert!(handle(request("1,2"), Job::new()).is_err());
+    }
+
+    #[test]
+    fn pdf_preview_renders_selected_page_with_bounded_dimensions() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("input.pdf");
+        let output = dir.path().join("preview.png");
+        let mut document = Document::with_version("1.7");
+        let parent = document.new_object_id();
+        let content = document.add_object(lopdf::Stream::new(
+            dictionary! {},
+            b"0 0 0 rg 0 0 200 300 re f".to_vec(),
+        ));
+        let first = document.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => parent,
+            "Contents" => content,
+        });
+        let second = document.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => parent,
+        });
+        document.objects.insert(
+            parent,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(first), Object::Reference(second)],
+                "Count" => 2,
+                "MediaBox" => vec![0.into(), 0.into(), 200.into(), 300.into()],
+            }),
+        );
+        let root = document.add_object(dictionary! {"Type" => "Catalog", "Pages" => parent});
+        document.trailer.set("Root", root);
+        document.save(&input).unwrap();
+
+        let request = |page: &str, output: &Path| Request {
+            operation: "pdf-preview".into(),
+            input: input.clone(),
+            output: output.to_path_buf(),
+            parameter: page.into(),
+            ..Request::default()
+        };
+        assert!(handle(request("0", &output), Job::new()).is_err());
+        assert!(handle(request("3", &output), Job::new()).is_err());
+        assert!(!output.exists());
+        let result = handle(request("1", &output), Job::new()).unwrap();
+        assert!(result.preview.contains("page 1 of 2"));
+        assert!(result.warnings[0].contains("Raster preview only"));
+        let rendered = image::open(&output).unwrap().to_rgba8();
+        assert_eq!(rendered.dimensions(), (200, 300));
+        assert!(rendered.get_pixel(100, 150).0[0] < 10);
+        let checksum = rendered
+            .as_raw()
+            .iter()
+            .fold(0xcbf29ce484222325_u64, |hash, byte| {
+                (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+            });
+        println!("page 1/2: 200x300 RGBA; black center pixel; FNV-1a64={checksum:016x}");
+
+        let second_output = dir.path().join("page-2.png");
+        let second_result = handle(request("2", &second_output), Job::new()).unwrap();
+        assert!(second_result.preview.contains("page 2 of 2"));
+        let second = image::open(second_output).unwrap().to_rgba8();
+        assert_eq!(second.dimensions(), (200, 300));
+        assert_eq!(second.get_pixel(100, 150).0, [255, 255, 255, 255]);
     }
 
     #[test]

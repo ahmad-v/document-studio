@@ -1,0 +1,82 @@
+name: Integration
+
+on:
+  pull_request:
+    types: [labeled, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: integration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-integration:
+    name: GUI, headless, and OCR adapters (Linux x64)
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'integration')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Linux GUI build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev xvfb
+      - name: Cache Cargo dependencies and target output
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            target
+          key: document-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-integration-default-ocr-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            document-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}-integration-default-ocr-
+      - name: Verify manifests and operation registry
+        run: |
+          cargo metadata --locked --format-version 1 --no-deps >/dev/null
+          python3 -m json.tool docs/capabilities.json >/dev/null
+          git diff --check
+      - name: Verify default GUI build and tests
+        run: |
+          cargo build --locked --bin document-studio
+          cargo test --locked
+          cargo clippy --locked --all-targets -- -D warnings
+      - name: Smoke-test native GUI startup under Xvfb
+        run: |
+          log_file="$(mktemp)"
+          set +e
+          xvfb-run -a timeout --signal=TERM --kill-after=5s 20s target/debug/document-studio >"$log_file" 2>&1
+          status=$?
+          set -e
+          cat "$log_file"
+          if grep -Eiq 'panicked at|thread .* panicked|panic occurred' "$log_file"; then
+            echo "The GUI process reported a panic." >&2
+            exit 1
+          fi
+          rm -f "$log_file"
+          case "$status" in
+            0|124|143) ;;
+            *) echo "GUI startup smoke failed with exit status $status." >&2; exit "$status" ;;
+          esac
+      - name: Verify headless build and CLI
+        run: |
+          cargo test --locked --no-default-features
+          cargo run --locked --no-default-features -- --cli --help
+      - name: Verify optional OCR adapter build and tests
+        run: |
+          cargo check --locked --features ocr --all-targets
+          cargo test --locked --features ocr
+      - name: Verify pinned Localwright dependency graph
+        run: |
+          cargo tree --locked -i localwright-core
+          cargo tree --locked -i localwright-ui

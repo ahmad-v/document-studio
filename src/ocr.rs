@@ -1,11 +1,19 @@
 //! Experimental PNG OCR through an application-private Tesseract executable.
 
+#[cfg(not(target_os = "windows"))]
+use localwright_core::{
+    engine::{EngineInvocation, EngineRuntime, EngineSpec},
+    Capability,
+};
 use localwright_core::{read_bounded, Error, ErrorKind, Job, Result};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
+};
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+use std::{
     process::{Child, Command, ExitStatus, Stdio},
     thread,
     time::{Duration, Instant},
@@ -119,6 +127,7 @@ fn png(input: &Path) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn wait(child: &mut Child, job: &Job) -> Result<ExitStatus> {
     let deadline = Instant::now() + Duration::from_secs(45);
     loop {
@@ -163,12 +172,8 @@ fn run(input: &Path, pdf: bool, job: &Job) -> Result<Vec<u8>> {
     } else {
         "tesseract"
     };
-    let executable = component(
-        &root,
-        executable_name,
-        option_env!("DOCUMENT_OCR_TESSERACT_SHA256"),
-        64 * 1024 * 1024,
-    )?;
+    let executable_pin = option_env!("DOCUMENT_OCR_TESSERACT_SHA256");
+    let executable = component(&root, executable_name, executable_pin, 64 * 1024 * 1024)?;
     let model = component(
         &root,
         "tessdata/eng.traineddata",
@@ -180,14 +185,154 @@ fn run(input: &Path, pdf: bool, job: &Job) -> Result<Vec<u8>> {
     fs::write(&image, png(input)?)?;
     job.check()?;
 
+    #[cfg(target_os = "linux")]
+    let libraries = private_libraries(&root, job)?;
+
+    #[cfg(target_os = "linux")]
+    if libraries.is_some() {
+        return run_direct(
+            &executable,
+            &model,
+            &image,
+            pdf,
+            output_limit,
+            libraries,
+            job,
+        );
+    }
+    #[cfg(target_os = "windows")]
+    return run_direct(&executable, &model, &image, pdf, output_limit, job);
+
+    #[cfg(not(target_os = "windows"))]
+    run_with_engine_runtime(
+        executable,
+        model,
+        image,
+        executable_name,
+        executable_pin,
+        scratch.path(),
+        pdf,
+        output_limit,
+        job,
+    )
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_with_engine_runtime(
+    executable: PathBuf,
+    model: PathBuf,
+    image: PathBuf,
+    executable_name: &str,
+    executable_pin: Option<&str>,
+    cache_dir: &Path,
+    pdf: bool,
+    output_limit: u64,
+    job: &Job,
+) -> Result<Vec<u8>> {
+    if image.to_str().is_none()
+        || model.parent().and_then(Path::to_str).is_none()
+        || cache_dir.to_str().is_none()
+    {
+        #[cfg(target_os = "linux")]
+        return run_direct(&executable, &model, &image, pdf, output_limit, None, job);
+        #[cfg(target_os = "macos")]
+        return run_direct(&executable, &model, &image, pdf, output_limit, job);
+    }
+    let spec = tesseract_engine_spec(
+        executable_name,
+        executable_pin.ok_or_else(|| Error::engine("OCR build has no pinned engine pack"))?,
+        usize::try_from(output_limit)
+            .map_err(|_| Error::input("OCR output limit exceeds this platform's capacity"))?,
+    );
+    let engine = EngineRuntime::resolve_trusted_path(spec, &executable)?;
+    let image_arg = image
+        .to_str()
+        .ok_or_else(|| Error::input("OCR temporary image path is not valid UTF-8"))?;
+    let tessdata = model
+        .parent()
+        .and_then(Path::to_str)
+        .ok_or_else(|| Error::input("OCR model path is not valid UTF-8"))?;
+    let cache_path = cache_dir
+        .to_str()
+        .ok_or_else(|| Error::input("OCR temporary directory is not valid UTF-8"))?;
+    let mut args = vec![
+        image_arg.to_owned(),
+        "stdout".into(),
+        "--tessdata-dir".into(),
+        tessdata.to_owned(),
+        "-l".into(),
+        "eng".into(),
+        "--psm".into(),
+        "6".into(),
+        "--dpi".into(),
+        "300".into(),
+    ];
+    if pdf {
+        args.extend(["-c".into(), "tessedit_create_pdf=1".into()]);
+    }
+    let output = engine.run(
+        EngineInvocation {
+            args,
+            environment: [
+                ("XDG_CACHE_HOME".into(), cache_path.to_owned()),
+                ("OMP_THREAD_LIMIT".into(), "1".into()),
+            ]
+            .into_iter()
+            .collect(),
+            ..EngineInvocation::default()
+        },
+        job,
+    )?;
+    job.check()?;
+    Ok(output.stdout)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn tesseract_engine_spec(executable_name: &str, sha256: &str, output_limit: usize) -> EngineSpec {
+    EngineSpec {
+        id: "document-tesseract".into(),
+        version: "runtime-adapter-1".into(),
+        executable: PathBuf::from(executable_name),
+        sha256: sha256.to_owned(),
+        license: "Apache-2.0".into(),
+        capabilities: vec![Capability {
+            format: "PNG".into(),
+            direction: "input-to-output".into(),
+            operation: "English OCR".into(),
+            engine: "Tesseract".into(),
+            limitations: "Experimental English-only offline OCR".into(),
+            fixture: "Document Studio OCR fixtures".into(),
+        }],
+        timeout_ms: 45_000,
+        max_stdin_bytes: 0,
+        max_stdout_bytes: output_limit,
+        max_stderr_bytes: 64 * 1024,
+        environment_allowlist: vec!["XDG_CACHE_HOME".into(), "OMP_THREAD_LIMIT".into()],
+        health_check_args: None,
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+fn run_direct(
+    executable: &Path,
+    model: &Path,
+    image: &Path,
+    pdf: bool,
+    output_limit: u64,
+    #[cfg(target_os = "linux")] libraries: Option<std::ffi::OsString>,
+    job: &Job,
+) -> Result<Vec<u8>> {
     let mut command = Command::new(executable);
     command
-        .current_dir(scratch.path())
+        .current_dir(image.parent().expect("OCR image is staged in a directory"))
         .env_clear()
-        .env("XDG_CACHE_HOME", scratch.path())
-        .env("TMPDIR", scratch.path())
-        .env("TEMP", scratch.path())
-        .env("TMP", scratch.path())
+        .env(
+            "XDG_CACHE_HOME",
+            image.parent().expect("image parent exists"),
+        )
+        .env("TMPDIR", image.parent().expect("image parent exists"))
+        .env("TEMP", image.parent().expect("image parent exists"))
+        .env("TMP", image.parent().expect("image parent exists"))
         .env("OMP_THREAD_LIMIT", "1")
         .args([
             image.as_os_str(),
@@ -203,7 +348,7 @@ fn run(input: &Path, pdf: bool, job: &Job) -> Result<Vec<u8>> {
         command.args(["-c", "tessedit_create_pdf=1"]);
     }
     #[cfg(target_os = "linux")]
-    if let Some(search_path) = private_libraries(&root, job)? {
+    if let Some(search_path) = libraries {
         command.env("LD_LIBRARY_PATH", search_path);
     }
     #[cfg(windows)]
@@ -245,4 +390,32 @@ fn run(input: &Path, pdf: bool, job: &Job) -> Result<Vec<u8>> {
     })?;
     job.check()?;
     Ok(result)
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_descriptor_is_hash_pinned_and_detects_pack_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("tesseract");
+        std::fs::write(&executable, b"pinned OCR engine fixture").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let digest = format!("{:x}", Sha256::digest(b"pinned OCR engine fixture"));
+        let spec = tesseract_engine_spec("tesseract", &digest, MAX_TEXT as usize);
+        assert_eq!(spec.timeout_ms, 45_000);
+        assert_eq!(spec.max_stdout_bytes, MAX_TEXT as usize);
+        assert_eq!(spec.max_stdin_bytes, 0);
+        assert_eq!(spec.license, "Apache-2.0");
+        let resolved = EngineRuntime::resolve_trusted_path(spec.clone(), &executable).unwrap();
+        assert_eq!(resolved.executable(), executable.as_path());
+
+        std::fs::write(&executable, b"modified engine fixture").unwrap();
+        assert!(EngineRuntime::resolve_trusted_path(spec, &executable).is_err());
+    }
 }
