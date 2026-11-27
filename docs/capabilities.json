@@ -83,7 +83,7 @@
     },
     {
       "operation": "pdf-preview",
-      "description": "Render a selected PDF page to a bounded PNG and open the native page navigation and zoom workspace",
+      "description": "Render a bounded PDF page preview and open the native workspace with bounded thumbnails, selected-page extraction and rotation, visual page-order controls, and save-to-new-copy reordering",
       "status": "implemented-unverified",
       "targets": [
         "x86_64-unknown-linux-gnu"
@@ -113,7 +113,7 @@
     },
     {
       "operation": "pdf-reorder",
-      "description": "Experimental page-only PDF reordering",
+      "description": "Experimental page-only PDF reordering from either a complete CLI page order or the native selected-page earlier/later controls; saves to a new path",
       "status": "implemented-unverified",
       "targets": [
         "x86_64-unknown-linux-gnu"

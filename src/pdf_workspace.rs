@@ -9,6 +9,45 @@ pub(crate) const VISIBLE_THUMBNAILS: usize = 9;
 pub(crate) const THUMBNAIL_CACHE_CAPACITY: usize = 12;
 pub(crate) const THUMBNAIL_MAX_EDGE: u16 = 160;
 
+/// Move a selected 1-based position by one place without changing its page identity.
+/// The order is bounded by `MAX_DOCUMENT_PAGES`, matching the PDF loading limit.
+pub(crate) fn move_page(order: &mut [usize], position: usize, delta: isize) -> Option<usize> {
+    if order.is_empty()
+        || order.len() > MAX_DOCUMENT_PAGES
+        || position == 0
+        || position > order.len()
+    {
+        return None;
+    }
+    let target = position.checked_add_signed(delta)?;
+    if target == 0 || target > order.len() || delta.unsigned_abs() != 1 {
+        return None;
+    }
+    order.swap(position - 1, target - 1);
+    Some(target)
+}
+
+pub(crate) fn serialize_page_order(order: &[usize]) -> Option<String> {
+    if order.is_empty() || order.len() > MAX_DOCUMENT_PAGES {
+        return None;
+    }
+    let mut seen = vec![false; order.len()];
+    for page in order {
+        let slot = page.checked_sub(1).and_then(|page| seen.get_mut(page))?;
+        if *slot {
+            return None;
+        }
+        *slot = true;
+    }
+    Some(
+        order
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+}
+
 pub(crate) fn document_within_limits(byte_len: u64, pages: usize, objects: usize) -> bool {
     byte_len <= MAX_DOCUMENT_BYTES && pages <= MAX_DOCUMENT_PAGES && objects <= MAX_DOCUMENT_OBJECTS
 }
@@ -138,5 +177,29 @@ mod tests {
         assert!(!document_within_limits(MAX_DOCUMENT_BYTES + 1, 1, 1));
         assert!(!document_within_limits(1, MAX_DOCUMENT_PAGES + 1, 1));
         assert!(!document_within_limits(1, 1, MAX_DOCUMENT_OBJECTS + 1));
+    }
+
+    #[test]
+    fn page_reordering_moves_one_selected_page_and_serializes_a_permutation() {
+        let mut order = vec![1, 2, 3, 4];
+        assert_eq!(move_page(&mut order, 3, -1), Some(2));
+        assert_eq!(order, [1, 3, 2, 4]);
+        assert_eq!(move_page(&mut order, 2, 1), Some(3));
+        assert_eq!(order, [1, 2, 3, 4]);
+        assert_eq!(serialize_page_order(&order).as_deref(), Some("1,2,3,4"));
+        assert_eq!(serialize_page_order(&[3, 1, 2]).as_deref(), Some("3,1,2"));
+        assert_eq!(serialize_page_order(&[1, 1]), None);
+        assert_eq!(serialize_page_order(&[1, 3]), None);
+    }
+
+    #[test]
+    fn page_reordering_rejects_invalid_positions_and_document_sizes() {
+        let mut order = vec![1, 2];
+        assert_eq!(move_page(&mut order, 1, -1), None);
+        assert_eq!(move_page(&mut order, 2, 1), None);
+        assert_eq!(move_page(&mut order, 0, 1), None);
+        assert_eq!(move_page(&mut order, 1, 2), None);
+        let mut oversized = vec![1; MAX_DOCUMENT_PAGES + 1];
+        assert_eq!(move_page(&mut oversized, 1, 1), None);
     }
 }
