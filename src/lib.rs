@@ -809,6 +809,43 @@ mod tests {
     }
 
     #[test]
+    fn pdf_merge_writes_a_new_page_only_copy_and_preserves_both_inputs() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = Path::new("tests/fixtures/two-pages.pdf").to_path_buf();
+        let second = directory.path().join("second.pdf");
+        let output = directory.path().join("merged.pdf");
+        std::fs::copy(&first, &second).unwrap();
+        let second_parameter = second.to_str().unwrap().to_owned();
+        handle(
+            Request {
+                operation: "pdf-merge".into(),
+                input: first.clone(),
+                output: output.clone(),
+                parameter: second_parameter.clone(),
+                ..Request::default()
+            },
+            Job::new(),
+        )
+        .unwrap();
+        assert_eq!(load(&first).unwrap().get_pages().len(), 2);
+        assert_eq!(load(&second).unwrap().get_pages().len(), 2);
+        assert_eq!(load(&output).unwrap().get_pages().len(), 4);
+
+        assert!(handle(
+            Request {
+                operation: "pdf-merge".into(),
+                input: first.clone(),
+                output: first.clone(),
+                parameter: second_parameter,
+                ..Request::default()
+            },
+            Job::new(),
+        )
+        .is_err());
+        assert_eq!(load(&first).unwrap().get_pages().len(), 2);
+    }
+
+    #[test]
     fn reorder_preserves_page_order_and_inherited_dimensions() {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("input.pdf");
