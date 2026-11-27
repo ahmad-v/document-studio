@@ -75,6 +75,38 @@ pub(crate) fn parse_page_selection(value: &str, total: usize) -> Option<usize> {
     (page > 0 && page <= total).then_some(page)
 }
 
+pub(crate) fn parse_page_range(value: &str, total: usize) -> Option<(usize, usize)> {
+    if value.len() > 16 || total == 0 {
+        return None;
+    }
+    let (start, end) = value.split_once('-')?;
+    let start = start.trim().parse::<usize>().ok()?;
+    let end = end.trim().parse::<usize>().ok()?;
+    (start > 0 && start <= end && end <= total).then_some((start, end))
+}
+
+pub(crate) fn is_pdf_input(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+}
+
+/// Match the PDF handler's lowercase extension requirement and avoid direct input path reuse.
+/// The handler's no-overwrite writer is the authoritative check for any existing destination.
+pub(crate) fn is_new_pdf_output(
+    source: &std::path::Path,
+    second_input: Option<&std::path::Path>,
+    output: &std::path::Path,
+) -> bool {
+    output.extension().and_then(|extension| extension.to_str()) == Some("pdf")
+        && output != source
+        && second_input != Some(output)
+}
+
+pub(crate) fn merge_request_parameter(path: &std::path::Path) -> Option<String> {
+    path.to_str().map(str::to_owned)
+}
+
 /// A small least-recently-used cache keyed by 1-based page number.
 #[derive(Debug)]
 pub(crate) struct BoundedPageCache<T> {
@@ -149,6 +181,49 @@ mod tests {
         assert_eq!(parse_page_selection("-1", 10), None);
         assert_eq!(parse_page_selection("99999", 1000), None);
         assert_eq!(parse_page_selection("1x", 10), None);
+    }
+
+    #[test]
+    fn split_ranges_and_output_paths_are_validated_for_the_native_workflow() {
+        assert_eq!(parse_page_range("1-2", 2), Some((1, 2)));
+        assert_eq!(parse_page_range(" 2 - 4 ", 4), Some((2, 4)));
+        assert_eq!(parse_page_range("0-2", 4), None);
+        assert_eq!(parse_page_range("3-2", 4), None);
+        assert_eq!(parse_page_range("1-5", 4), None);
+        assert_eq!(parse_page_range("1-2-3", 4), None);
+        assert_eq!(parse_page_range("1-2", 0), None);
+
+        let source = std::path::Path::new("source.pdf");
+        let second = std::path::Path::new("second.pdf");
+        assert!(is_pdf_input(std::path::Path::new("SECOND.PDF")));
+        assert!(is_new_pdf_output(
+            source,
+            Some(second),
+            std::path::Path::new("merged.pdf")
+        ));
+        assert!(!is_new_pdf_output(
+            source,
+            Some(second),
+            std::path::Path::new("source.pdf")
+        ));
+        assert!(!is_new_pdf_output(
+            source,
+            Some(second),
+            std::path::Path::new("second.pdf")
+        ));
+        assert!(!is_new_pdf_output(
+            source,
+            None,
+            std::path::Path::new("output.PDF")
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn merge_path_parameter_rejects_non_utf8_paths_instead_of_lossy_conversion() {
+        use std::os::unix::ffi::OsStringExt;
+        let path = std::path::PathBuf::from(std::ffi::OsString::from_vec(vec![b'/', 0xff]));
+        assert!(merge_request_parameter(&path).is_none());
     }
 
     #[test]

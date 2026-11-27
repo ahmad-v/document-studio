@@ -106,7 +106,7 @@
     },
     {
       "operation": "pdf-split",
-      "description": "Experimental page range",
+      "description": "Experimental native inclusive page-range extraction to one new page-only PDF copy; source and existing outputs are preserved",
       "status": "implemented-unverified",
       "targets": [],
       "fixture_status": "not run"
@@ -131,7 +131,7 @@
     },
     {
       "operation": "pdf-merge",
-      "description": "Experimental two-document page-only merge",
+      "description": "Experimental native page-only merge of the open PDF and a second selected PDF to a new output; UTF-8 second paths required; metadata and annotations may be omitted",
       "status": "implemented-unverified",
       "targets": [],
       "fixture_status": "not run"
