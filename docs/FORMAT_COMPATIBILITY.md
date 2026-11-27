@@ -12,6 +12,7 @@ Nothing is verified on a native target. The machine-readable registry is a devel
 | pdf-text | PDF text-layer extraction | implemented-unverified |
 | pdf-split | Experimental page range | implemented-unverified |
 | pdf-reorder | Experimental page-only PDF reordering | implemented-unverified |
+| pdf-delete-pages | Delete unique 1-based pages, retaining remaining pages in order | Linux selected-page, all-page refusal and invalid-selection fixtures tested |
 | pdf-merge | Experimental two-document page-only merge | implemented-unverified |
 
 See section 04-07 and 10 of the master specification for complete targets.

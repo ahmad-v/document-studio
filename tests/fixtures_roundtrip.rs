@@ -61,3 +61,37 @@ fn pdf_information_fixture() {
     assert_eq!(report["pages"], 2);
     assert_eq!(report["pdf_version"], "1.3");
 }
+
+#[test]
+fn deleting_selected_pdf_pages_preserves_remaining_order_and_refuses_empty_result() {
+    let root = tempfile::tempdir().unwrap();
+    let output = root.path().join("delete.pdf");
+    document_studio::handle(
+        Request {
+            operation: "pdf-delete-pages".into(),
+            input: "tests/fixtures/two-pages.pdf".into(),
+            output: output.clone(),
+            parameter: "1".into(),
+            ..Request::default()
+        },
+        Job::new(),
+    )
+    .unwrap();
+    let pdf = lopdf::Document::load(&output).unwrap();
+    assert_eq!(pdf.get_pages().len(), 1);
+    assert!(pdf.extract_text(&[1]).unwrap().contains("Page two"));
+
+    for parameter in ["1,2", "1,1", "0", "x"] {
+        assert!(document_studio::handle(
+            Request {
+                operation: "pdf-delete-pages".into(),
+                input: "tests/fixtures/two-pages.pdf".into(),
+                output: root.path().join(format!("bad-{parameter}.pdf")),
+                parameter: parameter.into(),
+                ..Request::default()
+            },
+            Job::new()
+        )
+        .is_err());
+    }
+}
