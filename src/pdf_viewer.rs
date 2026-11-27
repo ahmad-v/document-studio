@@ -284,15 +284,19 @@ impl Viewer {
             }
             None => text(&self.status).into(),
         };
-        let recent: Vec<Element<'_, Message>> = self.recent.iter().map(|path| {
-            let label = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("Recent PDF");
-            button(text(label).size(12))
-                .on_press_maybe((!self.loading).then_some(Message::OpenRecent(path.clone())))
-                .into()
-        }).collect();
+        let recent: Vec<Element<'_, Message>> = self
+            .recent
+            .iter()
+            .map(|path| {
+                let label = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("Recent PDF");
+                button(text(label).size(12))
+                    .on_press_maybe((!self.loading).then_some(Message::OpenRecent(path.clone())))
+                    .into()
+            })
+            .collect();
         column![
             controls,
             scrollable(row(recent).spacing(6))
