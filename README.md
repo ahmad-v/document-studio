@@ -6,7 +6,7 @@ Document Studio is an offline-first native document utility and an unverified de
 
 The application includes experimental PDF inspection, text extraction and page operations; basic Markdown/plain-text DOCX generation and DOCX body-text extraction; bounded text comparison; CSL JSON validation and CSL JSON/RIS/BibTeX interchange; and optional Linux-focused private Tesseract OCR routes. The OCR build does not include an engine or language pack by default. See [the manual](docs/MANUAL.md) and [capability registry](docs/capabilities.json) for the exact routes and limits.
 
-Most operations have Linux x86_64 fixture or CLI evidence. Experimental PDF page rasterization and a paginated native preview window are implemented and passed a synthetic two-page pixel fixture; hosted GUI and platform verification remain pending. The current source still lacks mature document conversion, structural/visual comparison, EPUB support, and installed-device acceptance. PDF structural edits are not redaction or sanitization and may omit annotations, metadata, bookmarks, forms, or unusual structures.
+Most operations have Linux x86_64 fixture or CLI evidence. Experimental PDF page rasterization and a native preview workspace are implemented; its synthetic two-page pixel fixture passed. The workspace now includes bounded thumbnail navigation, direct page selection and fit/zoom controls; this interface extension awaits hosted GUI verification. The current source still lacks mature document conversion, structural/visual comparison, EPUB support, and installed-device acceptance. PDF structural edits are not redaction or sanitization and may omit annotations, metadata, bookmarks, forms, or unusual structures.
 
 ## Development and verification
 

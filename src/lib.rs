@@ -6,8 +6,13 @@ mod docx_text;
 mod ocr;
 #[cfg(feature = "gui")]
 mod pdf_viewer;
+mod pdf_workspace;
 use localwright_core::*;
 use lopdf::{dictionary, Document, Object};
+use pdf_workspace::{
+    document_within_limits, MAX_DOCUMENT_BYTES, PREVIEW_MAX_EDGE, PREVIEW_MAX_PIXELS,
+    THUMBNAIL_MAX_EDGE, VISIBLE_THUMBNAILS,
+};
 use std::{io::Write, path::Path};
 use zip::{write::SimpleFileOptions, ZipWriter};
 pub const OPERATIONS:&[Operation]=&[
@@ -102,7 +107,7 @@ fn docx(p: &Path, source: &str, markdown: bool, j: &Job) -> Result<()> {
     })
 }
 fn load(p: &Path) -> Result<Document> {
-    let bytes = read_bounded(p, 32 * 1024 * 1024)?;
+    let bytes = read_bounded(p, MAX_DOCUMENT_BYTES)?;
     load_pdf_bytes(&bytes)
 }
 fn load_pdf_bytes(bytes: &[u8]) -> Result<Document> {
@@ -110,57 +115,52 @@ fn load_pdf_bytes(bytes: &[u8]) -> Result<Document> {
     if d.is_encrypted() {
         return Err(Error::input("Encrypted PDF not supported"));
     }
-    if d.get_pages().len() > 1000 || d.objects.len() > 100000 {
+    if !document_within_limits(bytes.len() as u64, d.get_pages().len(), d.objects.len()) {
         return Err(Error::input("PDF object or page limit exceeded"));
     }
     Ok(d)
 }
-const PREVIEW_MAX_EDGE: f32 = 1400.0;
-const PREVIEW_MAX_PIXELS: u32 = 1_500_000;
 
-fn render_page_rgba(
-    path: &Path,
+#[derive(Debug)]
+pub(crate) struct PagePixels {
+    pub(crate) page: usize,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) pixels: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ViewerBatch {
+    pub(crate) page_count: usize,
+    pub(crate) preview: PagePixels,
+    pub(crate) thumbnails: Vec<PagePixels>,
+}
+
+fn render_page_bitmap(
+    page: &hayro::hayro_syntax::page::Page<'_>,
     page_number: usize,
+    max_edge: u16,
     job: &Job,
-) -> Result<(u32, u32, Vec<u8>, usize)> {
-    let bytes = read_bounded(path, 32 * 1024 * 1024)?;
-    let document =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_pdf_bytes(&bytes)))
-            .map_err(|_| {
-                Error::input("PDF parser stopped unexpectedly while reading the document")
-            })??;
-    let page_count = document.get_pages().len();
-    if page_number == 0 || page_number > page_count {
-        return Err(Error::input("Choose an existing 1-based PDF page number"));
-    }
-    job.check()?;
-    let pdf = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        hayro::hayro_syntax::Pdf::new(bytes)
-    }))
-    .map_err(|_| Error::input("PDF renderer stopped unexpectedly while parsing the document"))?
-    .map_err(|_| Error::input("PDF renderer could not parse the document"))?;
-    let page = pdf
-        .pages()
-        .get(page_number - 1)
-        .ok_or_else(|| Error::input("PDF renderer could not find the requested page"))?;
+) -> Result<PagePixels> {
     let (page_width, page_height) = page.render_dimensions();
+    let page_area = page_width * page_height;
     if !page_width.is_finite()
         || !page_height.is_finite()
+        || !page_area.is_finite()
         || page_width <= 0.0
         || page_height <= 0.0
+        || page_area <= 0.0
     {
         return Err(Error::input("PDF page has invalid render dimensions"));
     }
-    let pixel_scale = (PREVIEW_MAX_EDGE / page_width.max(page_height))
-        .min((PREVIEW_MAX_PIXELS as f32 / (page_width * page_height)).sqrt())
+    let edge = f32::from(max_edge.max(1).min(PREVIEW_MAX_EDGE as u16));
+    let max_pixels = PREVIEW_MAX_PIXELS.min(u32::from(max_edge.max(1)).pow(2));
+    let pixel_scale = (edge / page_width.max(page_height))
+        .min((max_pixels as f32 / page_area).sqrt())
         .min(1.0);
-    let width = (page_width * pixel_scale)
-        .round()
-        .clamp(1.0, PREVIEW_MAX_EDGE) as u16;
-    let height = (page_height * pixel_scale)
-        .round()
-        .clamp(1.0, PREVIEW_MAX_EDGE) as u16;
-    if u32::from(width) * u32::from(height) > PREVIEW_MAX_PIXELS {
+    let width = (page_width * pixel_scale).round().clamp(1.0, edge) as u16;
+    let height = (page_height * pixel_scale).round().clamp(1.0, edge) as u16;
+    if u32::from(width) * u32::from(height) > max_pixels {
         return Err(Error::input("Rendered preview exceeds the pixel budget"));
     }
     job.check()?;
@@ -179,18 +179,89 @@ fn render_page_rgba(
     }))
     .map_err(|_| Error::engine("PDF renderer rejected the page while rendering"))?;
     job.check()?;
-    let rendered_width = u32::from(pixmap.width());
-    let rendered_height = u32::from(pixmap.height());
-    if rendered_width * rendered_height > PREVIEW_MAX_PIXELS {
+    let width = u32::from(pixmap.width());
+    let height = u32::from(pixmap.height());
+    if width * height > max_pixels {
         return Err(Error::engine(
             "PDF renderer exceeded the preview pixel budget",
         ));
     }
-    Ok((
-        rendered_width,
-        rendered_height,
-        pixmap.data_as_u8_slice().to_vec(),
+    Ok(PagePixels {
+        page: page_number,
+        width,
+        height,
+        pixels: pixmap.data_as_u8_slice().to_vec(),
+    })
+}
+
+pub(crate) fn render_viewer_batch(
+    path: &Path,
+    page_number: usize,
+    thumbnail_pages: &[usize],
+    job: &Job,
+) -> Result<ViewerBatch> {
+    if thumbnail_pages.len() > VISIBLE_THUMBNAILS {
+        return Err(Error::input(
+            "Thumbnail batch exceeds the bounded page window",
+        ));
+    }
+    let bytes = read_bounded(path, MAX_DOCUMENT_BYTES)?;
+    let document =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_pdf_bytes(&bytes)))
+            .map_err(|_| {
+                Error::input("PDF parser stopped unexpectedly while reading the document")
+            })??;
+    let page_count = document.get_pages().len();
+    if page_number == 0 || page_number > page_count {
+        return Err(Error::input("Choose an existing 1-based PDF page number"));
+    }
+    if thumbnail_pages
+        .iter()
+        .any(|page| *page == 0 || *page > page_count)
+    {
+        return Err(Error::input("Thumbnail page selection is out of range"));
+    }
+    job.check()?;
+    let pdf = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        hayro::hayro_syntax::Pdf::new(bytes)
+    }))
+    .map_err(|_| Error::input("PDF renderer stopped unexpectedly while parsing the document"))?
+    .map_err(|_| Error::input("PDF renderer could not parse the document"))?;
+    let pages = pdf.pages();
+    let page = pages
+        .get(page_number - 1)
+        .ok_or_else(|| Error::input("PDF renderer could not find the requested page"))?;
+    let preview = render_page_bitmap(page, page_number, PREVIEW_MAX_EDGE as u16, job)?;
+    let mut thumbnails = Vec::with_capacity(thumbnail_pages.len());
+    for thumbnail_page in thumbnail_pages {
+        job.check()?;
+        let Some(page) = pages.get(thumbnail_page - 1) else {
+            continue;
+        };
+        match render_page_bitmap(page, *thumbnail_page, THUMBNAIL_MAX_EDGE, job) {
+            Ok(thumbnail) => thumbnails.push(thumbnail),
+            Err(_) => {}
+        }
+        job.check()?;
+    }
+    Ok(ViewerBatch {
         page_count,
+        preview,
+        thumbnails,
+    })
+}
+
+fn render_page_rgba(
+    path: &Path,
+    page_number: usize,
+    job: &Job,
+) -> Result<(u32, u32, Vec<u8>, usize)> {
+    let batch = render_viewer_batch(path, page_number, &[], job)?;
+    Ok((
+        batch.preview.width,
+        batch.preview.height,
+        batch.preview.pixels,
+        batch.page_count,
     ))
 }
 

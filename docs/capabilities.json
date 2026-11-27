@@ -83,7 +83,7 @@
     },
     {
       "operation": "pdf-preview",
-      "description": "Render one selected PDF page to a bounded PNG and open the native paginated preview window",
+      "description": "Render a selected PDF page to a bounded PNG and open the native page navigation and zoom workspace",
       "status": "implemented-unverified",
       "targets": [
         "x86_64-unknown-linux-gnu"
