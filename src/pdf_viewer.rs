@@ -436,31 +436,6 @@ impl Viewer {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::remember_recent;
-    use std::path::{Path, PathBuf};
-
-    #[test]
-    fn recent_documents_are_deduplicated_and_bounded() {
-        let mut recent = Vec::new();
-        for index in 0..10 {
-            remember_recent(&mut recent, PathBuf::from(format!("{index}.pdf")));
-        }
-        remember_recent(&mut recent, PathBuf::from("5.pdf"));
-        assert_eq!(recent.len(), 8);
-        assert_eq!(recent[0], PathBuf::from("5.pdf"));
-        assert_eq!(
-            recent
-                .iter()
-                .filter(|path| path.as_path() == Path::new("5.pdf"))
-                .count(),
-            1
-        );
-        assert!(!recent.contains(&PathBuf::from("0.pdf")));
-    }
-}
-
 pub(super) fn run(path: PathBuf, initial_page: usize) -> std::result::Result<(), String> {
     let pages = std::panic::catch_unwind(AssertUnwindSafe(|| load(&path)))
         .map_err(|_| "PDF parser stopped unexpectedly while opening the preview".to_owned())?
@@ -500,4 +475,29 @@ pub(super) fn run(path: PathBuf, initial_page: usize) -> std::result::Result<(),
     .window_size(iced::Size::new(1120.0, 880.0))
     .run_with(move || (viewer, initial_task))
     .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remember_recent;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn recent_documents_are_deduplicated_and_bounded() {
+        let mut recent = Vec::new();
+        for index in 0..10 {
+            remember_recent(&mut recent, PathBuf::from(format!("{index}.pdf")));
+        }
+        remember_recent(&mut recent, PathBuf::from("5.pdf"));
+        assert_eq!(recent.len(), 8);
+        assert_eq!(recent[0], PathBuf::from("5.pdf"));
+        assert_eq!(
+            recent
+                .iter()
+                .filter(|path| path.as_path() == Path::new("5.pdf"))
+                .count(),
+            1
+        );
+        assert!(!recent.contains(&PathBuf::from("0.pdf")));
+    }
 }
