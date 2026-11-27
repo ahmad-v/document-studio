@@ -1,8 +1,11 @@
 //! Experimental PNG OCR through an application-private Tesseract executable.
 
-use localwright_core::{read_bounded, Error, ErrorKind, Job, Result};
 #[cfg(not(target_os = "windows"))]
-use localwright_core::{Capability, EngineInvocation, EngineRuntime, EngineSpec};
+use localwright_core::{
+    engine::{EngineInvocation, EngineRuntime, EngineSpec},
+    Capability,
+};
+use localwright_core::{read_bounded, Error, ErrorKind, Job, Result};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
