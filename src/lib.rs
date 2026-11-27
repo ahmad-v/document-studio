@@ -238,9 +238,8 @@ pub(crate) fn render_viewer_batch(
         let Some(page) = pages.get(thumbnail_page - 1) else {
             continue;
         };
-        match render_page_bitmap(page, *thumbnail_page, THUMBNAIL_MAX_EDGE, job) {
-            Ok(thumbnail) => thumbnails.push(thumbnail),
-            Err(_) => {}
+        if let Ok(thumbnail) = render_page_bitmap(page, *thumbnail_page, THUMBNAIL_MAX_EDGE, job) {
+            thumbnails.push(thumbnail);
         }
         job.check()?;
     }

@@ -51,6 +51,7 @@ impl<T> Default for BoundedPageCache<T> {
 }
 
 impl<T> BoundedPageCache<T> {
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
