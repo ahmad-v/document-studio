@@ -33,9 +33,7 @@ pub(crate) fn serialize_page_order(order: &[usize]) -> Option<String> {
     }
     let mut seen = vec![false; order.len()];
     for page in order {
-        let Some(slot) = page.checked_sub(1).and_then(|page| seen.get_mut(page)) else {
-            return None;
-        };
+        let slot = page.checked_sub(1).and_then(|page| seen.get_mut(page))?;
         if *slot {
             return None;
         }
