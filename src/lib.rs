@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+mod citations;
 mod compare;
 mod docx_text;
 #[cfg(feature = "ocr")]
@@ -12,6 +13,8 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"text-docx",label:"Plain text to DOCX",hint:"Convert UTF-8 text to literal DOCX paragraphs. Choose a new .docx output."},
  Operation{id:"docx-text",label:"DOCX body text",hint:"Extract plain text from a DOCX document body. Optional new .txt output."},
  Operation{id:"compare-text",label:"Compare text files",hint:"Enter the second UTF-8 text file path as the parameter. Optional new .txt report."},
+ Operation{id:"citation-convert",label:"Convert citation records",hint:"Parameter format pair: csl-json->ris, ris->csl-json, csl-json->bibtex, or ris->bibtex. Choose a new output with .json, .ris, or .bib extension."},
+ Operation{id:"citation-validate",label:"Validate CSL JSON bibliography",hint:"Validate one CSL JSON object or array (up to 10,000 records). Optional new .json report."},
  Operation{id:"pdf-info",label:"PDF information",hint:"Show the PDF version and page count. Optional new JSON output."},
  Operation{id:"pdf-text",label:"PDF text",hint:"Extract text from PDF text layer. Optional new .txt output. No OCR."},
  Operation{id:"pdf-split",label:"PDF page range",hint:"Parameter inclusive page range, e.g. 2-4. New .pdf output. Experimental; not sanitization."},
@@ -352,6 +355,47 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
             }
             preview
         }
+        "citation-convert" => {
+            let (from, to) = r
+                .parameter
+                .split_once("->")
+                .ok_or_else(|| Error::input("Enter source->target format"))?;
+            let ext = match to {
+                "csl-json" => "json",
+                "ris" => "ris",
+                "bibtex" => "bib",
+                _ => {
+                    return Err(Error::input(
+                        "Supported output formats are csl-json, ris and bibtex",
+                    ))
+                }
+            };
+            extension(&r.output, ext)?;
+            let input = read_bounded(&r.input, 8 * 1024 * 1024)?;
+            let bytes = citations::convert(&input, from, to, &j)?;
+            j.check()?;
+            write_bytes(&r.output, &bytes)?;
+            written = Some(r.output);
+            warnings.push("Interchange preserves only the fields supported by the selected formats. No citation style is rendered; review the bibliography before publication.".into());
+            String::from_utf8_lossy(&bytes)
+                .chars()
+                .take(24000)
+                .collect()
+        }
+        "citation-validate" => {
+            let input = read_bounded(&r.input, 8 * 1024 * 1024)?;
+            let count = citations::validate(&input)?;
+            let report = serde_json::to_string_pretty(
+                &serde_json::json!({"schema_version":1,"format":"CSL JSON","valid":true,"references":count}),
+            )?;
+            if !r.output.as_os_str().is_empty() {
+                extension(&r.output, "json")?;
+                j.check()?;
+                write_bytes(&r.output, report.as_bytes())?;
+                written = Some(r.output);
+            }
+            report
+        }
         "pdf-info" => {
             let document = load(&r.input)?;
             let report = serde_json::to_string_pretty(&serde_json::json!({
@@ -580,5 +624,46 @@ mod tests {
     #[test]
     fn xml_control() {
         assert!(xml("\u{1}").is_err());
+    }
+
+    #[test]
+    fn citation_routes_export_and_validate_without_overwriting() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("refs.json");
+        let output = dir.path().join("refs.ris");
+        std::fs::write(
+            &input,
+            r#"{"id":"unit","type":"article-journal","title":"Unicode café"}"#,
+        )
+        .unwrap();
+        let request = Request {
+            operation: "citation-convert".into(),
+            input: input.clone(),
+            output: output.clone(),
+            parameter: "csl-json->ris".into(),
+            ..Request::default()
+        };
+        let result = handle(request.clone(), Job::new()).unwrap();
+        assert!(result.preview.contains("Unicode café"));
+        let exported = std::fs::read_to_string(&output).unwrap();
+        assert!(exported.contains("TI  - Unicode café"));
+        assert!(handle(request, Job::new()).is_err());
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), exported);
+
+        let report = dir.path().join("validation.json");
+        let checked = handle(
+            Request {
+                operation: "citation-validate".into(),
+                input,
+                output: report.clone(),
+                ..Request::default()
+            },
+            Job::new(),
+        )
+        .unwrap();
+        assert!(checked.preview.contains("\"valid\": true"));
+        assert!(std::fs::read_to_string(report)
+            .unwrap()
+            .contains("\"references\": 1"));
     }
 }

@@ -8,6 +8,8 @@ Development source only. Launch the GUI after compiling. Choose an operation, en
 - `ocr-png`: English PNG OCR in an [optional engine build](OCR_ENGINE.md).
 - `docx-text`: Preview UTF-8 main-body text or write it to a new `.txt` file. Paragraphs, tabs and line breaks are retained. Layout, list markers, headers, footnotes and images are omitted. Hidden body text may appear. Macros, linked resources and external XML entities are never loaded by this route.
 - `compare-text`: Provide the original UTF-8 file as input and the revised file path as the parameter. Preview changes or save a new `.txt` report. Escaped line endings make missing final newlines and CRLF changes visible. Each input is limited to 1 MiB and 50,000 lines. Highly dissimilar inputs can reach the diff work limit.
+- `citation-validate`: Validate UTF-8 CSL JSON containing one reference object or an array of up to 10,000 references. Each entry needs a non-empty `type`; optional IDs and titles are checked. An optional `.json` output reports the validation result.
+- `citation-convert`: Convert using the parameter `source->target`: `csl-json->ris`, `ris->csl-json`, `csl-json->bibtex`, or `ris->bibtex`. Choose a new `.json`, `.ris`, or `.bib` output matching the target. Inputs and outputs are limited to 8 MiB. The RIS reader accepts complete tagged records and rejects continuation lines. Unsupported fields are dropped. Review exported records; this route does not render or validate APA, Harvard, Vancouver, or IEEE styles.
 - `pdf-info` reports the PDF version and page count with optional JSON output.
 - `pdf-text`: PDF text-layer extraction.
 - `pdf-split`: Experimental page range.
@@ -15,7 +17,7 @@ Development source only. Launch the GUI after compiling. Choose an operation, en
 - `pdf-delete-pages` writes a new PDF without selected pages. Enter unique 1-based page numbers separated by commas. The result must retain at least one page. This page-tree rewrite can omit annotations, bookmarks, forms and document metadata; it is not redaction or sanitization.
 - `pdf-merge`: Experimental two-document page-only merge.
 
-Limitations: Basic DOCX only; inline Markdown and layout omitted. PDF parsing and decompression limits are incomplete, active content can survive split/merge, and these operations are not redaction or sanitization. Page-only merge drops page annotations, document-level metadata/bookmarks/forms, and may lose inherited or unusual structures; no independent reader validation yet. No OCR, PDF renderer, Office fidelity, legacy converters, or structural and visual comparison.
+Limitations: Basic DOCX only; inline Markdown and layout omitted. Citation interchange is a bounded supported-field subset, not a citation manager or style engine. PDF parsing and decompression limits are incomplete, active content can survive split/merge, and these operations are not redaction or sanitization. Page-only merge drops page annotations, document-level metadata/bookmarks/forms, and may lose inherited or unusual structures; no independent reader validation yet. No OCR, PDF renderer, Office fidelity, legacy converters, or structural and visual comparison.
 
 No output overwrite is allowed. No accounts, ads, telemetry or runtime downloads are intended. Do not use this unverified snapshot with valuable or hostile input. Citation and donations are voluntary.
 

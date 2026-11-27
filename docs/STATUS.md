@@ -11,6 +11,8 @@ Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_
 | ocr-png-pdf | One-page searchable PDF from a PNG with optional private OCR | Linux x86_64 CLI and independent reader smoke-tested |
 | docx-text | UTF-8 WordprocessingML main-body plain text | Linux fixture and independent reader-tested |
 | compare-text | UTF-8 line changes with optional plain-text report | Linux integration fixture-tested |
+| citation-validate | Bounded CSL JSON bibliography validation | Linux route tests passed; hosted matrix pending |
+| citation-convert | CSL JSON/RIS interchange and CSL JSON/RIS to BibTeX export | Linux round-trip and route tests passed; hosted matrix pending |
 | pdf-info | PDF version and page count; optional JSON | Linux fixture-tested |
 | pdf-text | PDF text-layer extraction | Linux fixture-tested |
 | pdf-split | Experimental page range | Linux fixture-tested |
