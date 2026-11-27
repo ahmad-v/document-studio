@@ -3,6 +3,8 @@ use std::collections::VecDeque;
 pub(crate) const MAX_DOCUMENT_BYTES: u64 = 32 * 1024 * 1024;
 pub(crate) const MAX_DOCUMENT_PAGES: usize = 1000;
 pub(crate) const MAX_DOCUMENT_OBJECTS: usize = 100_000;
+pub(crate) const PREVIEW_MAX_EDGE: f32 = 1400.0;
+pub(crate) const PREVIEW_MAX_PIXELS: u32 = 1_500_000;
 pub(crate) const VISIBLE_THUMBNAILS: usize = 9;
 pub(crate) const THUMBNAIL_CACHE_CAPACITY: usize = 12;
 pub(crate) const THUMBNAIL_MAX_EDGE: u16 = 160;
