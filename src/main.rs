@@ -12,8 +12,9 @@ fn main() {
         return;
     }
     #[cfg(feature = "gui")]
-    if let Err(e) = localwright_ui::run(
+    if let Err(e) = localwright_ui::run_with_saved_appearance(
         "Document Studio",
+        "document-studio",
         document_studio::OPERATIONS,
         document_studio::handle,
     ) {

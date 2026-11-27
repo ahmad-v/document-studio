@@ -32,6 +32,74 @@ fn component(root: &Path, name: &str, pinned: Option<&str>, limit: u64) -> Resul
     Ok(path)
 }
 
+#[cfg(target_os = "linux")]
+fn private_libraries(root: &Path, job: &Job) -> Result<Option<std::ffi::OsString>> {
+    let directory = root.join("lib");
+    let Some(pin) = option_env!("DOCUMENT_OCR_LIBRARIES_SHA256") else {
+        if directory.exists() {
+            return Err(Error::engine(
+                "Private OCR libraries require a build-time manifest pin",
+            ));
+        }
+        return Ok(None);
+    };
+    if directory.canonicalize()? != directory {
+        return Err(Error::engine(
+            "Private OCR library directory must not redirect",
+        ));
+    }
+    let manifest_path = root.join("libraries.json");
+    if manifest_path.canonicalize()? != manifest_path {
+        return Err(Error::engine("OCR library manifest must not redirect"));
+    }
+    let bytes = read_bounded(&manifest_path, 64 * 1024)?;
+    if !format!("{:x}", Sha256::digest(&bytes)).eq_ignore_ascii_case(pin) {
+        return Err(Error::engine("OCR library manifest checksum mismatch"));
+    }
+    let manifest: serde_json::Value = serde_json::from_slice(&bytes)?;
+    let libraries = manifest["libraries"]
+        .as_object()
+        .filter(|entries| !entries.is_empty() && entries.len() <= 128)
+        .ok_or_else(|| Error::engine("Invalid OCR library manifest"))?;
+    if manifest["schema_version"].as_u64() != Some(1) {
+        return Err(Error::engine("Unsupported OCR library manifest version"));
+    }
+    let mut count = 0;
+    let mut total_bytes = 0u64;
+    for entry in fs::read_dir(&directory)? {
+        job.check()?;
+        let entry = entry?;
+        count += 1;
+        let name = entry.file_name();
+        let name = name
+            .to_str()
+            .filter(|name| {
+                name.contains(".so")
+                    && !name.starts_with('.')
+                    && name
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b".-+_".contains(&b))
+            })
+            .ok_or_else(|| Error::engine("Invalid private OCR library name"))?;
+        let expected = libraries
+            .get(name)
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| Error::engine(format!("Unlisted OCR library: {name}")))?;
+        let metadata = entry.metadata()?;
+        total_bytes = total_bytes
+            .checked_add(metadata.len())
+            .filter(|size| *size <= 256 * 1024 * 1024)
+            .ok_or_else(|| Error::engine("OCR library pack exceeds the byte limit"))?;
+        component(&directory, name, Some(expected), 64 * 1024 * 1024)?;
+    }
+    if count != libraries.len() {
+        return Err(Error::engine("OCR library pack is incomplete"));
+    }
+    std::env::join_paths([directory])
+        .map(Some)
+        .map_err(|error| Error::engine(error.to_string()))
+}
+
 fn png(input: &Path) -> Result<Vec<u8>> {
     let bytes = read_bounded(input, 16 * 1024 * 1024)?;
     if bytes.get(..16) != Some(b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR") {
@@ -66,6 +134,24 @@ fn wait(child: &mut Child, job: &Job) -> Result<ExitStatus> {
 }
 
 pub fn recognize(input: &Path, job: &Job) -> Result<String> {
+    let bytes = run(input, false, job)?;
+    String::from_utf8(bytes).map_err(|_| Error::engine("OCR did not produce UTF-8 text"))
+}
+
+pub fn searchable_pdf(input: &Path, job: &Job) -> Result<Vec<u8>> {
+    let bytes = run(input, true, job)?;
+    let document = lopdf::Document::load_mem(&bytes)
+        .map_err(|_| Error::engine("OCR did not produce a valid PDF"))?;
+    if document.is_encrypted() || document.get_pages().len() != 1 {
+        return Err(Error::engine("Expected a one-page unencrypted OCR PDF"));
+    }
+    job.check()?;
+    Ok(bytes)
+}
+
+fn run(input: &Path, pdf: bool, job: &Job) -> Result<Vec<u8>> {
+    const MAX_PDF: u64 = 64 * 1024 * 1024;
+    let output_limit = if pdf { MAX_PDF } else { MAX_TEXT };
     job.check()?;
     let app = std::env::current_exe()?.canonicalize()?;
     let root = app
@@ -113,6 +199,13 @@ pub fn recognize(input: &Path, job: &Job) -> Result<String> {
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .stdout(Stdio::piped());
+    if pdf {
+        command.args(["-c", "tessedit_create_pdf=1"]);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(search_path) = private_libraries(&root, job)? {
+        command.env("LD_LIBRARY_PATH", search_path);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -127,7 +220,7 @@ pub fn recognize(input: &Path, job: &Job) -> Result<String> {
     let result = thread::scope(|scope| {
         let reader = scope.spawn(move || {
             let mut bytes = Vec::new();
-            stdout.take(MAX_TEXT + 1).read_to_end(&mut bytes)?;
+            stdout.take(output_limit + 1).read_to_end(&mut bytes)?;
             Ok::<_, std::io::Error>(bytes)
         });
         let status = wait(&mut child, job);
@@ -139,16 +232,16 @@ pub fn recognize(input: &Path, job: &Job) -> Result<String> {
             .join()
             .map_err(|_| Error::engine("OCR reader stopped"))??;
         let status = status?;
-        if bytes.len() as u64 > MAX_TEXT {
+        if bytes.len() as u64 > output_limit {
             return Err(Error::new(
                 ErrorKind::Limit,
-                "OCR output exceeds the text limit",
+                "OCR output exceeds the size limit",
             ));
         }
         if !status.success() {
             return Err(Error::engine(format!("OCR engine failed ({status})")));
         }
-        String::from_utf8(bytes).map_err(|_| Error::engine("OCR did not produce UTF-8 text"))
+        Ok::<_, Error>(bytes)
     })?;
     job.check()?;
     Ok(result)
