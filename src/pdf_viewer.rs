@@ -1,7 +1,8 @@
 use crate::{
     load,
     pdf_workspace::{
-        move_page, page_window, parse_page_selection, serialize_page_order, BoundedPageCache,
+        is_new_pdf_output, is_pdf_input, merge_request_parameter, move_page, page_window,
+        parse_page_range, parse_page_selection, serialize_page_order, BoundedPageCache,
         THUMBNAIL_CACHE_CAPACITY,
     },
     render_viewer_batch, ViewerBatch,
@@ -28,6 +29,14 @@ enum Message {
     SaveReorderedCopy,
     ReorderPathChosen(Option<(PathBuf, PathBuf, String)>),
     Reordered(std::result::Result<(PathBuf, String), String>),
+    SplitRangeInput(String),
+    SavePageRange,
+    SplitPathChosen(Option<(PathBuf, PathBuf, String)>),
+    SplitDone(std::result::Result<(PathBuf, String), String>),
+    MergePdf,
+    MergeInputChosen(PathBuf, Option<PathBuf>),
+    MergeOutputChosen(Option<(PathBuf, PathBuf, String, PathBuf)>),
+    MergeDone(std::result::Result<(PathBuf, String), String>),
     CancelProcessing,
     Previous,
     Next,
@@ -47,6 +56,7 @@ struct Viewer {
     page: usize,
     pages: usize,
     page_order: Vec<usize>,
+    split_range: String,
     preview: Option<image::Handle>,
     preview_size: Option<(u32, u32)>,
     thumbnails: BoundedPageCache<image::Handle>,
@@ -177,6 +187,60 @@ fn reorder_task(source: PathBuf, output: PathBuf, order: String, job: Job) -> Ta
     )
 }
 
+fn page_range_task(source: PathBuf, output: PathBuf, range: String, job: Job) -> Task<Message> {
+    Task::perform(
+        async move {
+            std::thread::spawn(move || {
+                std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    crate::handle(
+                        Request {
+                            operation: "pdf-split".into(),
+                            input: source,
+                            output: output.clone(),
+                            parameter: range,
+                            ..Request::default()
+                        },
+                        job,
+                    )
+                    .map(|outcome| (output, outcome.preview))
+                    .map_err(|error| error.message)
+                }))
+                .unwrap_or_else(|_| Err("PDF page-range extraction stopped unexpectedly".into()))
+            })
+            .join()
+            .unwrap_or_else(|_| Err("PDF page-range worker stopped unexpectedly".into()))
+        },
+        Message::SplitDone,
+    )
+}
+
+fn merge_task(source: PathBuf, output: PathBuf, second_input: String, job: Job) -> Task<Message> {
+    Task::perform(
+        async move {
+            std::thread::spawn(move || {
+                std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    crate::handle(
+                        Request {
+                            operation: "pdf-merge".into(),
+                            input: source,
+                            output: output.clone(),
+                            parameter: second_input,
+                            ..Request::default()
+                        },
+                        job,
+                    )
+                    .map(|outcome| (output, outcome.preview))
+                    .map_err(|error| error.message)
+                }))
+                .unwrap_or_else(|_| Err("PDF merge stopped unexpectedly".into()))
+            })
+            .join()
+            .unwrap_or_else(|_| Err("PDF merge worker stopped unexpectedly".into()))
+        },
+        Message::MergeDone,
+    )
+}
+
 impl Viewer {
     fn open_path(&mut self, path: PathBuf) -> Task<Message> {
         self.path = path.clone();
@@ -184,6 +248,7 @@ impl Viewer {
         self.page = 1;
         self.pages = 1;
         self.page_order.clear();
+        self.split_range = "1-1".into();
         self.page_input = "1".into();
         self.preview = None;
         self.preview_size = None;
@@ -430,6 +495,147 @@ impl Viewer {
                     Err(error) => self.status = format!("Could not reorder the pages: {error}"),
                 }
             }
+            Message::SplitRangeInput(value) => self.split_range = value,
+            Message::SavePageRange if !self.loading && !self.processing => {
+                let Some((start, end)) = parse_page_range(&self.split_range, self.pages) else {
+                    self.status = format!(
+                        "Enter an inclusive page range from 1 to {} (start-end).",
+                        self.pages
+                    );
+                    return Task::none();
+                };
+                let source = self.path.clone();
+                let stem = self
+                    .path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("document")
+                    .to_owned();
+                let range = format!("{start}-{end}");
+                return Task::perform(
+                    async move {
+                        let default_name = format!("{stem}-pages-{start}-{end}.pdf");
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Save selected page range as a new PDF")
+                            .add_filter("PDF document", &["pdf"])
+                            .set_file_name(&default_name)
+                            .save_file()
+                            .await
+                            .map(|file| (source, file.path().to_path_buf(), range))
+                    },
+                    Message::SplitPathChosen,
+                );
+            }
+            Message::SplitPathChosen(Some((source, output, range)))
+                if !self.loading && !self.processing =>
+            {
+                if source != self.path {
+                    self.status = "The open PDF changed while the save dialog was active. Retry the range operation.".into();
+                    return Task::none();
+                }
+                if !is_new_pdf_output(&source, None, &output) {
+                    self.status =
+                        "Choose a new output path with a lowercase .pdf extension.".into();
+                    return Task::none();
+                }
+                self.processing = true;
+                self.processing_job = Job::new();
+                self.status = format!("Saving pages {range} to a new PDF; source preserved…");
+                return page_range_task(source, output, range, self.processing_job.clone());
+            }
+            Message::SplitDone(result) => {
+                self.processing = false;
+                self.processing_job = Job::new();
+                self.status = match result {
+                    Ok((output, summary)) => {
+                        format!("{summary} at {}; source preserved. Structural output may omit annotations, bookmarks, forms, or metadata.", output.display())
+                    }
+                    Err(error) => format!("Could not save the selected page range: {error}"),
+                };
+            }
+            Message::MergePdf if !self.loading && !self.processing => {
+                let source = self.path.clone();
+                return Task::perform(
+                    async move {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Choose a second PDF to merge")
+                            .add_filter("PDF document", &["pdf"])
+                            .pick_file()
+                            .await
+                            .map(|file| file.path().to_path_buf())
+                    },
+                    move |second| Message::MergeInputChosen(source, second),
+                );
+            }
+            Message::MergeInputChosen(source, Some(second))
+                if !self.loading && !self.processing =>
+            {
+                if source != self.path {
+                    self.status =
+                        "The open PDF changed while the file dialog was active. Retry the merge."
+                            .into();
+                    return Task::none();
+                }
+                if !is_pdf_input(&second) {
+                    self.status = "Choose a PDF as the second merge input.".into();
+                    return Task::none();
+                }
+                if source == second {
+                    self.status = "Choose a different second PDF.".into();
+                    return Task::none();
+                }
+                let Some(parameter) = merge_request_parameter(&second) else {
+                    self.status = "The second PDF path is not valid UTF-8 and cannot be passed safely to the current request interface.".into();
+                    return Task::none();
+                };
+                let stem = source
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("document")
+                    .to_owned();
+                return Task::perform(
+                    async move {
+                        let default_name = format!("{stem}-merged.pdf");
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Save merged PDF copy")
+                            .add_filter("PDF document", &["pdf"])
+                            .set_file_name(&default_name)
+                            .save_file()
+                            .await
+                            .map(|file| (source, second, parameter, file.path().to_path_buf()))
+                    },
+                    Message::MergeOutputChosen,
+                );
+            }
+            Message::MergeOutputChosen(Some((source, second, parameter, output)))
+                if !self.loading && !self.processing =>
+            {
+                if source != self.path {
+                    self.status =
+                        "The open PDF changed while the save dialog was active. Retry the merge."
+                            .into();
+                    return Task::none();
+                }
+                if !is_new_pdf_output(&source, Some(&second), &output) {
+                    self.status = "Choose a new output path with a lowercase .pdf extension that does not match either input.".into();
+                    return Task::none();
+                }
+                self.processing = true;
+                self.processing_job = Job::new();
+                self.status = "Experimental page-only merge running; annotations, forms, bookmarks, or document metadata may be lost…".into();
+                return merge_task(source, output, parameter, self.processing_job.clone());
+            }
+            Message::MergeDone(result) => {
+                self.processing = false;
+                self.processing_job = Job::new();
+                self.status = match result {
+                    Ok((output, summary)) => format!(
+                        "{summary} at {}; source PDFs preserved. Page-only experimental output may omit annotations, forms, bookmarks, and document metadata.",
+                        output.display()
+                    ),
+                    Err(error) => format!("Could not merge the PDFs: {error}"),
+                };
+            }
             Message::Previous if !self.loading && self.page > 1 => {
                 return self.request_page(self.page - 1);
             }
@@ -464,6 +670,7 @@ impl Viewer {
                         Ok(batch) => {
                             if self.page_order.len() != batch.page_count {
                                 self.page_order = (1..=batch.page_count).collect();
+                                self.split_range = format!("1-{}", batch.page_count);
                             }
                             self.preview = Some(image::Handle::from_rgba(
                                 batch.preview.width,
@@ -557,6 +764,10 @@ impl Viewer {
             (!self.loading && !self.processing && serialize_page_order(&self.page_order).is_some())
                 .then_some(Message::SaveReorderedCopy),
         );
+        let save_page_range = button("Save range as PDF…")
+            .on_press_maybe((!self.loading && !self.processing).then_some(Message::SavePageRange));
+        let merge_pdf = button("Merge PDF pages only… (experimental)")
+            .on_press_maybe((!self.loading && !self.processing).then_some(Message::MergePdf));
         let go = button("Go");
         let go = if !self.loading {
             go.on_press(Message::GoToPage)
@@ -647,6 +858,16 @@ impl Viewer {
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center);
+        let structure_controls = row![
+            text("Page range"),
+            text_input("start-end", &self.split_range)
+                .on_input(Message::SplitRangeInput)
+                .width(Length::Fixed(112.0)),
+            save_page_range,
+            merge_pdf,
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
         let content: Element<'_, Message> = match &self.preview {
             Some(handle) => {
                 let preview = image(handle.clone()).content_fit(ContentFit::Contain);
@@ -678,6 +899,7 @@ impl Viewer {
             navigation,
             controls,
             reorder_controls,
+            structure_controls,
             scrollable(row(recent).spacing(6))
                 .direction(scrollable::Direction::Horizontal(
                     scrollable::Scrollbar::default(),
@@ -718,6 +940,7 @@ pub(super) fn run(path: PathBuf, initial_page: usize) -> std::result::Result<(),
         page: initial_page,
         pages,
         page_order: (1..=pages).collect(),
+        split_range: format!("1-{pages}"),
         preview: None,
         preview_size: None,
         thumbnails: BoundedPageCache::default(),
