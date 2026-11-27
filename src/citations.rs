@@ -50,6 +50,24 @@ fn records(value: Value) -> Result<Vec<Value>> {
                 return Err(invalid("CSL title must be a string"));
             }
         }
+        if let Some(authors) = object.get("author") {
+            let authors = authors
+                .as_array()
+                .ok_or_else(|| invalid("CSL author must be an array of name objects"))?;
+            if authors.len() > 10_000 {
+                return Err(invalid("A CSL reference has too many authors"));
+            }
+            for author in authors {
+                let name = author
+                    .as_object()
+                    .ok_or_else(|| invalid("Each CSL author must be an object"))?;
+                for field in ["family", "given"] {
+                    if name.get(field).is_some_and(|value| !value.is_string()) {
+                        return Err(invalid(format!("CSL author {field} name must be a string")));
+                    }
+                }
+            }
+        }
     }
     Ok(list)
 }
