@@ -6,7 +6,7 @@ use iced::{
 use localwright_core::Job;
 use std::{panic::AssertUnwindSafe, path::PathBuf};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Message {
     Previous,
     Next,
