@@ -292,7 +292,7 @@ impl Viewer {
             button(text(label).size(12))
                 .on_press_maybe((!self.loading).then_some(Message::OpenRecent(path.clone())))
                 .into()
-        });
+        }).collect();
         column![
             controls,
             scrollable(row(recent).spacing(6))
