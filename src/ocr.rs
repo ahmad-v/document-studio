@@ -190,6 +190,8 @@ fn run(input: &Path, pdf: bool, job: &Job) -> Result<Vec<u8>> {
 
     #[cfg(target_os = "linux")]
     if libraries.is_some() {
+        // Localwright reserves LD_LIBRARY_PATH. Keep this narrow compatibility route for a
+        // hash-verified private library pack until the shared runtime supports loader paths.
         return run_direct(
             &executable,
             &model,
@@ -201,34 +203,49 @@ fn run(input: &Path, pdf: bool, job: &Job) -> Result<Vec<u8>> {
         );
     }
     #[cfg(target_os = "windows")]
+    // Preserve CREATE_NO_WINDOW until the shared runtime exposes this Windows launch option.
     return run_direct(&executable, &model, &image, pdf, output_limit, job);
 
     #[cfg(not(target_os = "windows"))]
     run_with_engine_runtime(
-        executable,
-        model,
-        image,
-        executable_name,
-        executable_pin,
-        scratch.path(),
-        pdf,
-        output_limit,
+        RuntimeRequest {
+            executable,
+            model,
+            image,
+            executable_name,
+            executable_pin,
+            cache_dir: scratch.path(),
+            pdf,
+            output_limit,
+        },
         job,
     )
 }
 
 #[cfg(not(target_os = "windows"))]
-fn run_with_engine_runtime(
+struct RuntimeRequest<'a> {
     executable: PathBuf,
     model: PathBuf,
     image: PathBuf,
-    executable_name: &str,
-    executable_pin: Option<&str>,
-    cache_dir: &Path,
+    executable_name: &'a str,
+    executable_pin: Option<&'a str>,
+    cache_dir: &'a Path,
     pdf: bool,
     output_limit: u64,
-    job: &Job,
-) -> Result<Vec<u8>> {
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_with_engine_runtime(request: RuntimeRequest<'_>, job: &Job) -> Result<Vec<u8>> {
+    let RuntimeRequest {
+        executable,
+        model,
+        image,
+        executable_name,
+        executable_pin,
+        cache_dir,
+        pdf,
+        output_limit,
+    } = request;
     if image.to_str().is_none()
         || model.parent().and_then(Path::to_str).is_none()
         || cache_dir.to_str().is_none()
@@ -291,7 +308,7 @@ fn run_with_engine_runtime(
 fn tesseract_engine_spec(executable_name: &str, sha256: &str, output_limit: usize) -> EngineSpec {
     EngineSpec {
         id: "document-tesseract".into(),
-        version: "runtime-adapter-1".into(),
+        version: "runtime-adapter-2".into(),
         executable: PathBuf::from(executable_name),
         sha256: sha256.to_owned(),
         license: "Apache-2.0".into(),
@@ -417,5 +434,73 @@ mod tests {
 
         std::fs::write(&executable, b"modified engine fixture").unwrap();
         assert!(EngineRuntime::resolve_trusted_path(spec, &executable).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_pack_uses_localwright_runtime_with_bounded_output() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("tesseract");
+        let script = b"#!/bin/sh\nprintf '%s' 'runtime OCR fixture'\n";
+        std::fs::write(&executable, script).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let tessdata = directory.path().join("tessdata");
+        std::fs::create_dir(&tessdata).unwrap();
+        let model = tessdata.join("eng.traineddata");
+        let image = directory.path().join("input.png");
+        std::fs::write(&image, b"fixture image").unwrap();
+        let digest = format!("{:x}", Sha256::digest(script));
+
+        let output = run_with_engine_runtime(
+            RuntimeRequest {
+                executable,
+                model,
+                image,
+                executable_name: "tesseract",
+                executable_pin: Some(&digest),
+                cache_dir: directory.path(),
+                pdf: false,
+                output_limit: 64,
+            },
+            &Job::new(),
+        )
+        .unwrap();
+        assert_eq!(output, b"runtime OCR fixture");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn localwright_runtime_enforces_the_ocr_output_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("tesseract");
+        let script = b"#!/bin/sh\nprintf '0123456789'\n";
+        std::fs::write(&executable, script).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let tessdata = directory.path().join("tessdata");
+        std::fs::create_dir(&tessdata).unwrap();
+        let model = tessdata.join("eng.traineddata");
+        let image = directory.path().join("input.png");
+        std::fs::write(&image, b"fixture image").unwrap();
+        let digest = format!("{:x}", Sha256::digest(script));
+
+        let error = run_with_engine_runtime(
+            RuntimeRequest {
+                executable,
+                model,
+                image,
+                executable_name: "tesseract",
+                executable_pin: Some(&digest),
+                cache_dir: directory.path(),
+                pdf: false,
+                output_limit: 4,
+            },
+            &Job::new(),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Limit);
     }
 }
