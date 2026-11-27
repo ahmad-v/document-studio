@@ -106,7 +106,7 @@ fn load(p: &Path) -> Result<Document> {
     load_pdf_bytes(&bytes)
 }
 fn load_pdf_bytes(bytes: &[u8]) -> Result<Document> {
-    let d = Document::load_mem(&bytes).map_err(err)?;
+    let d = Document::load_mem(bytes).map_err(err)?;
     if d.is_encrypted() {
         return Err(Error::input("Encrypted PDF not supported"));
     }
