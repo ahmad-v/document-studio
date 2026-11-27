@@ -166,7 +166,8 @@ impl Viewer {
                     .path
                     .file_stem()
                     .and_then(|stem| stem.to_str())
-                    .unwrap_or("document");
+                    .unwrap_or("document")
+                    .to_owned();
                 return Task::perform(
                     async move {
                         let default_name = format!("{file_name}-page-{page}.pdf");
