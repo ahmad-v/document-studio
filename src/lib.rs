@@ -17,6 +17,7 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"pdf-split",label:"PDF page range",hint:"Parameter inclusive page range, e.g. 2-4. New .pdf output. Experimental; not sanitization."},
  Operation{id:"pdf-rotate",label:"Rotate PDF pages",hint:"Enter start-end,degrees, e.g. 2-4,90. Use 90, 180 or 270 clockwise. Choose a new PDF."},
  Operation{id:"pdf-reorder",label:"Reorder PDF pages",hint:"Enter every page once, in the desired order, e.g. 3,1,2. Choose a new .pdf output."},
+ Operation{id:"pdf-delete-pages",label:"Delete PDF pages",hint:"Enter one or more unique 1-based page numbers separated by commas. Preserves the remaining page order. Choose a new .pdf output. This is not sanitization."},
  Operation{id:"pdf-merge",label:"Merge PDFs",hint:"Input first PDF; parameter second PDF path. New .pdf output. Experimental page-only merge."},
  #[cfg(feature="ocr")]
  Operation{id:"ocr-png",label:"Experimental PNG OCR",hint:"Recognize English text using the private OCR pack. Optional new .txt output."},
@@ -211,6 +212,30 @@ fn reorder(d: Document, order: &str, j: &Job) -> Result<Document> {
     rebuild_pages([(d, ids)], &version, j)
 }
 
+fn delete_pages(d: Document, selection: &str, j: &Job) -> Result<Document> {
+    if selection.len() > 16 * 1024 {
+        return Err(Error::input("Page selection exceeds the limit"));
+    }
+    let pages = d.get_pages();
+    let mut remove = std::collections::HashSet::new();
+    for item in selection.split(',') {
+        j.check()?;
+        let page = item.trim().parse::<u32>().map_err(err)?;
+        if page == 0 || !pages.contains_key(&page) || !remove.insert(page) {
+            return Err(Error::input("Choose unique existing 1-based page numbers"));
+        }
+    }
+    if remove.is_empty() || remove.len() >= pages.len() {
+        return Err(Error::input("PDF must retain at least one page"));
+    }
+    let keep = pages
+        .into_iter()
+        .filter_map(|(number, id)| (!remove.contains(&number)).then_some(id))
+        .collect();
+    let version = d.version.clone();
+    rebuild_pages([(d, keep)], &version, j)
+}
+
 fn rebuild_pages(
     sources: impl IntoIterator<Item = (Document, Vec<lopdf::ObjectId>)>,
     version: &str,
@@ -363,7 +388,7 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
             );
             s.chars().take(24000).collect()
         }
-        "pdf-split" | "pdf-merge" | "pdf-reorder" | "pdf-rotate" => {
+        "pdf-split" | "pdf-merge" | "pdf-reorder" | "pdf-delete-pages" | "pdf-rotate" => {
             extension(&r.output, "pdf")?;
             let mut d = load(&r.input)?;
             if r.operation == "pdf-split" {
@@ -381,6 +406,8 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
             } else {
                 d = if r.operation == "pdf-reorder" {
                     reorder(d, &r.parameter, &j)?
+                } else if r.operation == "pdf-delete-pages" {
+                    delete_pages(d, &r.parameter, &j)?
                 } else {
                     merge(d, load(Path::new(&r.parameter))?, &j)?
                 };

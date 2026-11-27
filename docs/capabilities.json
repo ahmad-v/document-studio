@@ -84,6 +84,13 @@
       "fixture_status": "Linux x86_64 integration fixture passed"
     },
     {
+      "operation": "pdf-delete-pages",
+      "description": "Delete selected PDF pages while retaining the original order of remaining pages",
+      "status": "implemented-unverified",
+      "targets": ["x86_64-unknown-linux-gnu"],
+      "fixture_status": "Linux page-text preservation, all-page refusal and invalid-selection fixtures passed"
+    },
+    {
       "operation": "pdf-merge",
       "description": "Experimental two-document page-only merge",
       "status": "implemented-unverified",

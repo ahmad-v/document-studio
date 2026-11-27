@@ -15,10 +15,11 @@ Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_
 | pdf-text | PDF text-layer extraction | Linux fixture-tested |
 | pdf-split | Experimental page range | Linux fixture-tested |
 | pdf-reorder | Experimental page-only PDF reordering | Linux fixture-tested |
+| pdf-delete-pages | Delete selected PDF pages while retaining remaining order | Linux fixture-tested |
 | pdf-merge | Experimental two-document page-only merge | Linux fixture-tested |
 
 ## Known gaps
 
-Basic DOCX creation and body-text extraction; inline Markdown and layout omitted. PDF parsing and decompression limits are incomplete, active content can survive split/merge, and these operations are not redaction or sanitization. Page-only merge drops page annotations, document-level metadata/bookmarks/forms, and may lose inherited or unusual structures. No standard OCR pack, PDF renderer, Office fidelity, legacy converters, or structural and visual comparison.
+Basic DOCX creation and body-text extraction; inline Markdown and layout omitted. PDF parsing and decompression limits are incomplete, active content can survive structural edits, and these operations are not redaction or sanitization. Page-only merge/reorder/delete may drop page annotations, document-level metadata, bookmarks and forms, and may lose inherited or unusual structures. No standard OCR pack, PDF renderer, Office fidelity, legacy converters, or structural and visual comparison.
 
 Hosted matrix, device, and packaging verification remain open. See [verification evidence](VERIFICATION.md) and [dependency review](DEPENDENCIES.md).
