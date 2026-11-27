@@ -19,11 +19,12 @@ quick-xml = "=0.42.0"
 image = { version = "=0.25.8", default-features = false, features = ["png"] }
 hayro = { version = "=0.9.0" }
 iced = { version = "=0.13.1", default-features = false, features = ["tiny-skia", "fira-sans", "image-without-codecs"], optional = true }
+rfd = { version = "=0.15.4", default-features = false, features = ["async-std", "xdg-portal"], optional = true }
 
 
 [features]
 default = ["gui"]
-gui = ["dep:localwright-ui", "dep:iced"]
+gui = ["dep:localwright-ui", "dep:iced", "dep:rfd"]
 ocr = ["dep:sha2", "dep:tempfile"]
 
 [dev-dependencies]

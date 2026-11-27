@@ -936,6 +936,7 @@ dependencies = [
  "localwright-ui",
  "lopdf",
  "quick-xml 0.42.0",
+ "rfd",
  "serde_json",
  "sha2",
  "tempfile",

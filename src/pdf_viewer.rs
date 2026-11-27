@@ -14,6 +14,9 @@ use std::{panic::AssertUnwindSafe, path::PathBuf, sync::Arc};
 
 #[derive(Debug, Clone)]
 enum Message {
+    Open,
+    OpenDialogComplete(Option<PathBuf>),
+    OpenRecent(PathBuf),
     Previous,
     Next,
     SelectPage(usize),
@@ -37,8 +40,15 @@ struct Viewer {
     page_input: String,
     zoom: Option<f32>,
     status: String,
+    recent: Vec<PathBuf>,
     job: Job,
     loading: bool,
+}
+
+fn remember_recent(recent: &mut Vec<PathBuf>, path: PathBuf) {
+    recent.retain(|existing| existing != &path);
+    recent.insert(0, path);
+    recent.truncate(8);
 }
 
 fn render_task(path: PathBuf, page: usize, thumbnail_pages: Vec<usize>, job: Job) -> Task<Message> {
@@ -60,6 +70,19 @@ fn render_task(path: PathBuf, page: usize, thumbnail_pages: Vec<usize>, job: Job
 }
 
 impl Viewer {
+    fn open_path(&mut self, path: PathBuf) -> Task<Message> {
+        self.path = path.clone();
+        remember_recent(&mut self.recent, path);
+        self.page = 1;
+        self.pages = 1;
+        self.page_input = "1".into();
+        self.preview = None;
+        self.preview_size = None;
+        self.thumbnails = BoundedPageCache::default();
+        self.zoom = None;
+        self.request_page(1)
+    }
+
     fn request_page(&mut self, page: usize) -> Task<Message> {
         if self.loading || page == 0 || page > self.pages {
             return Task::none();
@@ -84,6 +107,23 @@ impl Viewer {
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Open if !self.loading => {
+                return Task::perform(
+                    async {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Open a PDF document")
+                            .add_filter("PDF document", &["pdf"])
+                            .pick_file()
+                            .await
+                            .map(|file| file.path().to_path_buf())
+                    },
+                    Message::OpenDialogComplete,
+                );
+            }
+            Message::OpenDialogComplete(Some(path)) if !self.loading => {
+                return self.open_path(path);
+            }
+            Message::OpenRecent(path) if !self.loading => return self.open_path(path),
             Message::Previous if !self.loading && self.page > 1 => {
                 return self.request_page(self.page - 1);
             }
@@ -213,6 +253,7 @@ impl Viewer {
             ))
             .height(Length::Fixed(132.0));
         let controls = row![
+            button("Open PDF").on_press_maybe((!self.loading).then_some(Message::Open)),
             previous,
             text(format!("Page {} of {}", self.page, self.pages)),
             next,
@@ -243,8 +284,22 @@ impl Viewer {
             }
             None => text(&self.status).into(),
         };
+        let recent: Vec<Element<'_, Message>> = self.recent.iter().map(|path| {
+            let label = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Recent PDF");
+            button(text(label).size(12))
+                .on_press_maybe((!self.loading).then_some(Message::OpenRecent(path.clone())))
+                .into()
+        });
         column![
             controls,
+            scrollable(row(recent).spacing(6))
+                .direction(scrollable::Direction::Horizontal(
+                    scrollable::Scrollbar::default(),
+                ))
+                .height(Length::Fixed(36.0)),
             text(&self.status),
             thumbnail_strip,
             scrollable(
@@ -263,6 +318,31 @@ impl Viewer {
         .spacing(10)
         .padding(14)
         .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remember_recent;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn recent_documents_are_deduplicated_and_bounded() {
+        let mut recent = Vec::new();
+        for index in 0..10 {
+            remember_recent(&mut recent, PathBuf::from(format!("{index}.pdf")));
+        }
+        remember_recent(&mut recent, PathBuf::from("5.pdf"));
+        assert_eq!(recent.len(), 8);
+        assert_eq!(recent[0], PathBuf::from("5.pdf"));
+        assert_eq!(
+            recent
+                .iter()
+                .filter(|path| path.as_path() == Path::new("5.pdf"))
+                .count(),
+            1
+        );
+        assert!(!recent.contains(&PathBuf::from("0.pdf")));
     }
 }
 
@@ -285,6 +365,7 @@ pub(super) fn run(path: PathBuf, initial_page: usize) -> std::result::Result<(),
         page_input: initial_page.to_string(),
         zoom: None,
         status: format!("Rendering page {initial_page}…"),
+        recent: vec![path.clone()],
         job: Job::new(),
         loading: true,
     };
