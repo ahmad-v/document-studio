@@ -20,7 +20,10 @@ enum Message {
     ExtractCurrentPage,
     ExtractPathChosen(Option<(PathBuf, PathBuf, usize)>),
     Extracted(std::result::Result<String, String>),
-    CancelExtraction,
+    RotateCurrentPage(u16),
+    RotatePathChosen(Option<(PathBuf, PathBuf, usize, u16)>),
+    Rotated(std::result::Result<(PathBuf, String), String>),
+    CancelProcessing,
     Previous,
     Next,
     SelectPage(usize),
@@ -99,6 +102,39 @@ fn extract_task(path: PathBuf, output: PathBuf, page: usize, job: Job) -> Task<M
             .unwrap_or_else(|_| Err("PDF extraction worker stopped unexpectedly".into()))
         },
         Message::Extracted,
+    )
+}
+
+fn rotate_task(
+    source: PathBuf,
+    output: PathBuf,
+    page: usize,
+    degrees: u16,
+    job: Job,
+) -> Task<Message> {
+    Task::perform(
+        async move {
+            std::thread::spawn(move || {
+                std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    crate::handle(
+                        Request {
+                            operation: "pdf-rotate".into(),
+                            input: source,
+                            output: output.clone(),
+                            parameter: format!("{page}-{page},{degrees}"),
+                            ..Request::default()
+                        },
+                        job,
+                    )
+                    .map(|outcome| (output, outcome.preview))
+                    .map_err(|error| error.message)
+                }))
+                .unwrap_or_else(|_| Err("PDF rotation stopped unexpectedly".into()))
+            })
+            .join()
+            .unwrap_or_else(|_| Err("PDF rotation worker stopped unexpectedly".into()))
+        },
+        Message::Rotated,
     )
 }
 
@@ -210,9 +246,63 @@ impl Viewer {
                     Err(error) => format!("Could not extract the selected page: {error}"),
                 };
             }
-            Message::CancelExtraction if self.processing => {
+            Message::CancelProcessing if self.processing => {
                 self.processing_job.cancel();
-                self.status = "Extraction cancellation requested.".into();
+                self.status = "Document-operation cancellation requested.".into();
+            }
+            Message::RotateCurrentPage(degrees) if !self.loading && !self.processing => {
+                let source = self.path.clone();
+                let page = self.page;
+                let stem = self
+                    .path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("document")
+                    .to_owned();
+                return Task::perform(
+                    async move {
+                        let default_name = format!("{stem}-page-{page}-rotated.pdf");
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Save rotated PDF copy")
+                            .add_filter("PDF document", &["pdf"])
+                            .set_file_name(&default_name)
+                            .save_file()
+                            .await
+                            .map(|file| (source, file.path().to_path_buf(), page, degrees))
+                    },
+                    Message::RotatePathChosen,
+                );
+            }
+            Message::RotatePathChosen(Some((source, output, page, degrees)))
+                if !self.loading && !self.processing =>
+            {
+                if !output
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+                {
+                    self.status = "Choose a .pdf output path.".into();
+                    return Task::none();
+                }
+                if output == source {
+                    self.status = "Choose a new output path to preserve the original PDF.".into();
+                    return Task::none();
+                }
+                self.processing = true;
+                self.processing_job = Job::new();
+                self.status = format!("Rotating page {page} clockwise by {degrees}°…");
+                return rotate_task(source, output, page, degrees, self.processing_job.clone());
+            }
+            Message::Rotated(result) => {
+                self.processing = false;
+                self.processing_job = Job::new();
+                match result {
+                    Ok((output, summary)) => {
+                        self.status = format!("{summary}; original document preserved.");
+                        return self.open_path(output);
+                    }
+                    Err(error) => self.status = format!("Could not rotate the page: {error}"),
+                }
             }
             Message::Previous if !self.loading && self.page > 1 => {
                 return self.request_page(self.page - 1);
@@ -308,12 +398,18 @@ impl Viewer {
         } else {
             extract
         };
-        let cancel_extraction = button("Cancel extraction");
-        let cancel_extraction = if self.processing {
-            cancel_extraction.on_press(Message::CancelExtraction)
+        let cancel_processing = button("Cancel operation");
+        let cancel_processing = if self.processing {
+            cancel_processing.on_press(Message::CancelProcessing)
         } else {
-            cancel_extraction
+            cancel_processing
         };
+        let rotate_clockwise = button("Rotate page 90° CW").on_press_maybe(
+            (!self.loading && !self.processing).then_some(Message::RotateCurrentPage(90)),
+        );
+        let rotate_counterclockwise = button("Rotate page 90° CCW").on_press_maybe(
+            (!self.loading && !self.processing).then_some(Message::RotateCurrentPage(270)),
+        );
         let go = button("Go");
         let go = if !self.loading {
             go.on_press(Message::GoToPage)
@@ -376,7 +472,9 @@ impl Viewer {
             button("Fit").on_press(Message::Fit),
             cancel,
             extract,
-            cancel_extraction,
+            rotate_clockwise,
+            rotate_counterclockwise,
+            cancel_processing,
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center);
