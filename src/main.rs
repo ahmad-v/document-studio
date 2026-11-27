@@ -1,6 +1,28 @@
 #![forbid(unsafe_code)]
 fn main() {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
+    #[cfg(feature = "gui")]
+    if args.first().map(String::as_str) == Some("--preview-pdf") {
+        args.remove(0);
+        let Some(input) = args.first() else {
+            eprintln!("Usage: document-studio --preview-pdf <input.pdf> [page]");
+            std::process::exit(2);
+        };
+        let page = args
+            .get(1)
+            .map(|value| value.parse::<usize>())
+            .transpose()
+            .unwrap_or_else(|_| {
+                eprintln!("Page must be a positive integer");
+                std::process::exit(2);
+            })
+            .unwrap_or(1);
+        if let Err(error) = document_studio::run_pdf_preview(std::path::Path::new(input), page) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if args.first().map(String::as_str) == Some("--cli") {
         args.remove(0);
         if let Err(e) =
