@@ -98,6 +98,10 @@ enum Message {
     MergeInputChosen(PathBuf, Option<PathBuf>),
     MergeOutputChosen(Option<(PathBuf, PathBuf, String, PathBuf)>),
     MergeDone(std::result::Result<(PathBuf, String), String>),
+    ComparePdf,
+    CompareInputChosen(PathBuf, Option<PathBuf>),
+    CompareOutputChosen(Option<(PathBuf, PathBuf, String, PathBuf)>),
+    Compared(std::result::Result<(PathBuf, String), String>),
     CancelProcessing,
     Previous,
     Next,
@@ -334,6 +338,33 @@ fn merge_task(source: PathBuf, output: PathBuf, second_input: String, job: Job) 
             .unwrap_or_else(|_| Err("PDF merge worker stopped unexpectedly".into()))
         },
         Message::MergeDone,
+    )
+}
+
+fn compare_task(source: PathBuf, output: PathBuf, second_input: String, job: Job) -> Task<Message> {
+    Task::perform(
+        async move {
+            std::thread::spawn(move || {
+                std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    crate::handle(
+                        Request {
+                            operation: "pdf-compare".into(),
+                            input: source,
+                            output: output.clone(),
+                            parameter: second_input,
+                            ..Request::default()
+                        },
+                        job,
+                    )
+                    .map(|outcome| (output, outcome.preview))
+                    .map_err(|error| error.message)
+                }))
+                .unwrap_or_else(|_| Err("PDF comparison stopped unexpectedly".into()))
+            })
+            .join()
+            .unwrap_or_else(|_| Err("PDF comparison worker stopped unexpectedly".into()))
+        },
+        Message::Compared,
     )
 }
 
@@ -739,6 +770,83 @@ impl Viewer {
                     Err(error) => format!("Could not merge the PDFs: {error}"),
                 };
             }
+            Message::ComparePdf if !self.loading && !self.processing => {
+                let source = self.path.clone();
+                return Task::perform(
+                    async move {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Choose a second PDF to compare")
+                            .add_filter("PDF document", &["pdf"])
+                            .pick_file()
+                            .await
+                            .map(|file| file.path().to_path_buf())
+                    },
+                    move |second| Message::CompareInputChosen(source.clone(), second),
+                );
+            }
+            Message::CompareInputChosen(source, Some(second))
+                if !self.loading && !self.processing =>
+            {
+                if source != self.path {
+                    self.status = "The open PDF changed while the file dialog was active. Retry the comparison.".into();
+                    return Task::none();
+                }
+                if !is_pdf_input(&second) || source == second {
+                    self.status = "Choose a different PDF as the comparison input.".into();
+                    return Task::none();
+                }
+                let Some(parameter) = second.to_str().map(str::to_owned) else {
+                    self.status = "The second PDF path is not valid UTF-8 for the current comparison request interface.".into();
+                    return Task::none();
+                };
+                let stem = source
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("document")
+                    .to_owned();
+                return Task::perform(
+                    async move {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Save PDF comparison report")
+                            .add_filter("JSON report", &["json"])
+                            .set_file_name(&format!("{stem}-comparison.json"))
+                            .save_file()
+                            .await
+                            .map(|file| (source, second, parameter, file.path().to_path_buf()))
+                    },
+                    Message::CompareOutputChosen,
+                );
+            }
+            Message::CompareOutputChosen(Some((source, second, parameter, output)))
+                if !self.loading && !self.processing =>
+            {
+                if source != self.path {
+                    self.status = "The open PDF changed while the save dialog was active. Retry the comparison.".into();
+                    return Task::none();
+                }
+                let json_output = output.extension().and_then(|ext| ext.to_str()) == Some("json");
+                if !json_output || output == source || output == second {
+                    self.status =
+                        "Choose a new .json path that differs from both input PDFs.".into();
+                    return Task::none();
+                }
+                self.processing = true;
+                self.processing_job = Job::new();
+                self.status =
+                    "Comparing PDF text, page geometry and bounded visual previews…".into();
+                return compare_task(source, output, parameter, self.processing_job.clone());
+            }
+            Message::Compared(result) => {
+                self.processing = false;
+                self.processing_job = Job::new();
+                self.status = match result {
+                    Ok((output, summary)) => format!(
+                        "{summary}; report saved to {}. Inputs preserved.",
+                        output.display()
+                    ),
+                    Err(error) => format!("Could not compare the PDFs: {error}"),
+                };
+            }
             Message::Previous if !self.loading && self.page > 1 => {
                 return self.request_page(self.page - 1);
             }
@@ -1083,6 +1191,9 @@ impl Viewer {
                 .width(Length::Fixed(112.0)),
             save_page_range,
             merge_pdf,
+            button("Compare with PDF…").on_press_maybe(
+                (!self.loading && !self.processing).then_some(Message::ComparePdf),
+            ),
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center);

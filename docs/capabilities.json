@@ -118,7 +118,7 @@
     },
     {
       "operation": "pdf-preview",
-      "description": "Bounded PDF raster preview and native workspace with page navigation, zoom, thumbnails, structural page tools, and case-insensitive text-layer search with matching-page navigation",
+      "description": "Bounded native PDF viewer with page navigation, zoom, thumbnails, structural tools, text search and search-result navigation",
       "status": "implemented-unverified",
       "targets": [
         "x86_64-unknown-linux-gnu"
@@ -170,6 +170,15 @@
       "status": "implemented-unverified",
       "targets": [],
       "fixture_status": "not run"
+    },
+    {
+      "operation": "pdf-compare",
+      "description": "Bounded two-PDF comparison of page counts, selected metadata, extracted text, page geometry and low-resolution rendered pixels",
+      "status": "implemented-unverified",
+      "targets": [
+        "x86_64-unknown-linux-gnu"
+      ],
+      "fixture_status": "Added synthetic fixture for repeatable equality and visual/page-dimension changes plus a 100-page rejection bound; hosted Check/Integration/platform verification pending. Renderer fidelity and parser sandbox limitations are disclosed."
     }
   ]
 }
