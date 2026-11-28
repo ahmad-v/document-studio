@@ -94,6 +94,13 @@
       "fixture_status": "Added native operation-route fixture for metadata, chapter order, Markdown escaping and no-overwrite; hosted verification pending"
     },
     {
+      "operation": "markdown-epub",
+      "description": "Convert bounded UTF-8 Markdown to a self-contained EPUB 3 XHTML/OPF package with CommonMark structure; external link/image resources omitted and raw HTML escaped",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "Added operation-route coverage for package structure, stored mimetype, metadata escaping, structural formatting, external-resource omission, raw-HTML escaping, source preservation, invalid metadata and no-overwrite; hosted verification pending"
+    },
+    {
       "operation": "epub-reader",
       "description": "Native offline EPUB plain-text reader with chapter navigation, bounded UTF-8-safe text pages, adjustable text size and session recents; no layout rendering",
       "status": "implemented-unverified",

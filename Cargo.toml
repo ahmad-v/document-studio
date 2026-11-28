@@ -16,6 +16,7 @@ tempfile = { version = "=3.19.1", optional = true }
 zip = { version = "=9.0.5", default-features = false, features = ["deflate"] }
 lopdf = { version = "=0.42.0", default-features = false }
 quick-xml = "=0.42.0"
+pulldown-cmark = { version = "=0.13.0", default-features = false, features = ["html"] }
 image = { version = "=0.25.8", default-features = false, features = ["png"] }
 hayro = { version = "=0.9.0" }
 iced = { version = "=0.13.1", default-features = false, features = ["tiny-skia", "fira-sans", "image-without-codecs"], optional = true }

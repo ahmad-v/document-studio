@@ -12,6 +12,7 @@ Nothing is verified on a native target. The machine-readable registry is a devel
 | epub-inspect | Bounded EPUB container, metadata, manifest and reading-order spine inspection | Fixtures added; hosted verification pending; not a complete EPUB conformance validator |
 | epub-text | UTF-8 XHTML body text in EPUB spine order | Fixtures added; hosted verification pending; no layout/CSS/image rendering |
 | epub-markdown | Bounded package metadata, spine headings and escaped plain-text XHTML body export | Operation-route fixture added; hosted verification pending; no layout, style, navigation, image or media conversion |
+| markdown-epub | Bounded UTF-8 CommonMark to self-contained EPUB 3 XHTML/OPF package; supports headings, lists, emphasis, tables and code; removes links/images and escapes raw HTML | Operation-route tests added; hosted verification pending; structural conversion only, not page-layout conversion |
 | epub-reader | Native offline chapter reader with UTF-8-safe bounded text pages and adjustable text size | Source unit/route tests added; hosted GUI and native target verification pending; plain-text content only |
 | compare-text | UTF-8 line changes with optional plain-text report | implemented-unverified |
 | citation-validate | Bounded CSL JSON object/array validation | Linux unit and operation-route fixtures tested |
