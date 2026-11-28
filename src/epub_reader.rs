@@ -77,7 +77,7 @@ fn page_starts(value: &str) -> Vec<usize> {
 fn chapter_window(selected: usize, total: usize) -> Range<usize> {
     let before = VISIBLE_CHAPTERS / 2;
     let mut start = selected.saturating_sub(before);
-    let mut end = (start + VISIBLE_CHAPTERS).min(total);
+    let end = (start + VISIBLE_CHAPTERS).min(total);
     if end.saturating_sub(start) < VISIBLE_CHAPTERS {
         start = end.saturating_sub(VISIBLE_CHAPTERS);
     }
@@ -85,9 +85,10 @@ fn chapter_window(selected: usize, total: usize) -> Range<usize> {
 }
 
 fn load_task(path: PathBuf, job: Job) -> Task<Message> {
+    let result_path = path.clone();
     Task::perform(
         async move {
-            let worker_path = path.clone();
+            let worker_path = path;
             std::thread::spawn(move || {
                 std::panic::catch_unwind(AssertUnwindSafe(|| {
                     epub::read_book(&worker_path, &job).map_err(|error| error.message)
@@ -97,7 +98,7 @@ fn load_task(path: PathBuf, job: Job) -> Task<Message> {
             .join()
             .unwrap_or_else(|_| Err("The EPUB loading worker stopped unexpectedly".into()))
         },
-        move |result| Message::Loaded(path, result),
+        move |result| Message::Loaded(result_path, result),
     )
 }
 
@@ -328,16 +329,22 @@ impl Reader {
         )
         .height(Length::Fill);
 
-        let recent = self.recent.iter().map(|path| {
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("Recent EPUB");
-            button(text(name).size(12)).on_press_maybe(
-                (!self.loading && !self.dialog_opening)
-                    .then_some(Message::OpenChosen(Some(path.clone()))),
-            )
-        });
+        let recent: Vec<Element<'_, Message>> = self
+            .recent
+            .iter()
+            .map(|path| {
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("Recent EPUB");
+                button(text(name).size(12))
+                    .on_press_maybe(
+                        (!self.loading && !self.dialog_opening)
+                            .then_some(Message::OpenChosen(Some(path.clone()))),
+                    )
+                    .into()
+            })
+            .collect();
 
         column![
             row![open, text(&self.status)].spacing(12).align_y(iced::Alignment::Center),
