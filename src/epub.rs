@@ -154,7 +154,7 @@ pub(crate) fn read_book(path: &Path, job: &Job) -> Result<EpubBook> {
             .strip_suffix(".xhtml")
             .or_else(|| item.path.rsplit('/').next())
             .filter(|name| !name.is_empty())
-            .map(|name| name.replace('_', " ").replace('-', " "))
+            .map(|name| name.replace(['_', '-'], " "))
             .unwrap_or_else(|| format!("Chapter {}", index + 1));
         chapters.push(EpubChapter {
             label,
