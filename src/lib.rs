@@ -40,7 +40,9 @@ pub const OPERATIONS:&[Operation]=&[
  #[cfg(feature="ocr")]
  Operation{id:"ocr-png",label:"Experimental PNG OCR",hint:"Recognize English text using the private OCR pack. Optional new .txt output."},
  #[cfg(feature="ocr")]
- Operation{id:"ocr-png-pdf",label:"Searchable PDF from PNG",hint:"Create a new one-page PDF with the original image and a recognized English text layer."}];
+ Operation{id:"ocr-png-pdf",label:"Searchable PDF from PNG",hint:"Create a new one-page PDF with the original image and a recognized English text layer."},
+ #[cfg(feature="ocr")]
+ Operation{id:"ocr-pdf",label:"Create searchable PDF copy",hint:"Render and OCR 1–20 PDF pages with the private English OCR pack. Creates a new raster-page PDF with a searchable text layer; annotations, forms, bookmarks and document metadata are not retained."}];
 fn err(e: impl std::fmt::Display) -> Error {
     Error::input(e.to_string())
 }
@@ -566,6 +568,18 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
                     .into(),
             );
             "Created a one-page searchable PDF".into()
+        }
+        #[cfg(feature = "ocr")]
+        "ocr-pdf" => {
+            extension(&r.output, "pdf")?;
+            let pdf = ocr::searchable_pdf_document(&r.input, &j)?;
+            j.check()?;
+            write_bytes(&r.output, &pdf)?;
+            written = Some(r.output);
+            warnings.push(
+                "English OCR is experimental. Pages are rasterized; text is searchable but original vector content, annotations, forms, bookmarks and document metadata are not retained. Review the output against the original; this is not sanitation or redaction.".into(),
+            );
+            "Created searchable PDF copy".into()
         }
         "docx-text" => {
             let text = docx_text::extract(&r.input, &j)?;

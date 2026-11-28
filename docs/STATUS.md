@@ -9,6 +9,7 @@ Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_
 | markdown-docx | Basic ATX headings and literal paragraphs to DOCX | Linux fixture-tested |
 | ocr-png | Optional private Tesseract and English data | Linux x64 smoke-tested |
 | ocr-png-pdf | One-page searchable PDF from a PNG with optional private OCR | Linux x86_64 CLI and independent reader smoke-tested |
+| ocr-pdf | Searchable raster-page PDF copy, limited to 20 pages, via private English OCR | Implemented-unverified; offline pack, render/OCR fixtures and target verification pending |
 | docx-text | UTF-8 WordprocessingML main-body plain text | Linux fixture and independent reader-tested |
 | epub-inspect | Bounded EPUB package metadata/container/spine inspection through the native operation workspace | Source and fixtures added; hosted verification pending; not complete EPUB validation |
 | epub-text | Ordered plain-text extraction from declared UTF-8 XHTML spine items | Source and fixtures added; hosted verification pending; layout and non-text content omitted |
