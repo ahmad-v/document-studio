@@ -17,6 +17,7 @@ Nothing is verified on a native target. The machine-readable registry is a devel
 | citation-validate | Bounded CSL JSON object/array validation | Linux unit and operation-route fixtures tested |
 | citation-convert | Supported-field CSL JSON/RIS interchange and CSL JSON/RIS to BibTeX export | Linux unit and route fixtures tested; exported records require human review |
 | pdf-text | PDF text-layer extraction | implemented-unverified |
+| pdf-compare | Structural metadata/text/page-geometry and low-resolution raster comparison of two bounded PDFs | Synthetic renderer fixture added; hosted verification pending; not complete structure or signature validation |
 | pdf-split | Experimental page range | implemented-unverified |
 | pdf-reorder | Experimental page-only PDF reordering | implemented-unverified |
 | pdf-delete-pages | Delete unique 1-based pages, retaining remaining pages in order | Linux selected-page, all-page refusal and invalid-selection fixtures tested |

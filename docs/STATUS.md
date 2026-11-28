@@ -21,6 +21,7 @@ Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_
 | pdf-info | PDF version, page count, file size and available title/author/subject/creator/producer metadata; optional JSON | Local metadata unit and PDF information fixture tests passed; default GUI library check passed; hosted matrix pending |
 | pdf-preview | Bounded one-page raster PNG and native paginated viewer with page navigation, thumbnails, structural page tools, selected-page dimensions, metadata and text-layer search | Synthetic render fixture passed; two-page text-search, query-limit and cancellation tests added; exact GUI test is being verified locally; hosted integration and native matrix pending |
 | pdf-text | PDF text-layer extraction | Linux fixture-tested |
+| pdf-compare | Bounded comparison of page counts, selected metadata, page text, geometry and 224-edge rendered pixel previews; 32 MiB file, 100-page and 8 MiB text bounds | Synthetic equality/change and page-limit fixtures added; hosted Check/Integration/native verification pending; comparison is not full object, signature or archival validation |
 | pdf-split | Experimental inclusive page-range extraction; native viewer saves the selected range to a new page-only PDF | Linux fixture-tested; native workflow source tests added, hosted GUI verification pending |
 | pdf-reorder | Experimental page-only PDF reordering | Linux fixture-tested |
 | pdf-delete-pages | Delete selected PDF pages while retaining remaining order | Linux fixture-tested |

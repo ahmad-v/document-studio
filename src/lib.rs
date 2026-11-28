@@ -7,6 +7,7 @@ mod epub;
 mod epub_reader;
 #[cfg(feature = "ocr")]
 mod ocr;
+mod pdf_compare;
 #[cfg(feature = "gui")]
 mod pdf_viewer;
 mod pdf_workspace;
@@ -34,6 +35,7 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"pdf-info",label:"PDF information",hint:"Show the PDF version and page count. Optional new JSON output."},
  Operation{id:"pdf-preview",label:"Render PDF page preview",hint:"Render one 1-based page to a bounded PNG. Enter the page number (default 1) and choose a new .png output. Raster preview only; rendering fidelity and unsupported PDF features may vary."},
  Operation{id:"pdf-text",label:"PDF text",hint:"Extract text from PDF text layer. Optional new .txt output. No OCR."},
+ Operation{id:"pdf-compare",label:"Compare PDFs",hint:"Enter the second PDF path. Compare page count, Info metadata, extracted text, page dimensions and bounded low-resolution rendered pixels. Writes a new .json report; this is not a signature, full object, accessibility, or archival fidelity comparison."},
  Operation{id:"pdf-split",label:"PDF page range",hint:"Parameter inclusive page range, e.g. 2-4. New .pdf output. Experimental; not sanitization."},
  Operation{id:"pdf-rotate",label:"Rotate PDF pages",hint:"Enter start-end,degrees, e.g. 2-4,90. Use 90, 180 or 270 clockwise. Choose a new PDF."},
  Operation{id:"pdf-reorder",label:"Reorder PDF pages",hint:"Enter every page once, in the desired order, e.g. 3,1,2. Choose a new .pdf output."},
@@ -802,6 +804,19 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
                 "Text layer only; reading order, fonts and encoding can affect extraction.".into(),
             );
             s.chars().take(24000).collect()
+        }
+        "pdf-compare" => {
+            extension(&r.output, "json")?;
+            if r.parameter.trim().is_empty() {
+                return Err(Error::input("Enter the path to the second PDF"));
+            }
+            let report = pdf_compare::compare(&r.input, Path::new(&r.parameter), &j)?;
+            let report = serde_json::to_string_pretty(&report)?;
+            j.check()?;
+            write_bytes(&r.output, report.as_bytes())?;
+            written = Some(r.output);
+            warnings.push("The report compares page count, selected Info metadata, text-layer extraction, page dimensions and low-resolution raster previews. Hayro rendering is not complete PDF fidelity; annotations, forms, tags, signatures, embedded files, scripts and complete object structure are not compared. Parsing and rendering are in-process, not sandboxed, and input bounds do not impose a hard CPU/memory quota.".into());
+            report
         }
         "pdf-split" | "pdf-merge" | "pdf-reorder" | "pdf-delete-pages" | "pdf-rotate" => {
             extension(&r.output, "pdf")?;
