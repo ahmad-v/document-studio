@@ -5,6 +5,7 @@ mod docx_text;
 mod epub;
 #[cfg(feature = "gui")]
 mod epub_reader;
+mod markdown_epub;
 #[cfg(feature = "ocr")]
 mod ocr;
 mod pdf_compare;
@@ -27,6 +28,7 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"epub-inspect",label:"Inspect EPUB package",hint:"Inspect bounded EPUB container, metadata and spine structure. Optional new .json report. This is not a complete EPUB conformance validator or layout renderer."},
  Operation{id:"epub-text",label:"Extract EPUB text",hint:"Extract UTF-8 XHTML body text in reading order. Optional new .txt output. Styles, images, scripts, navigation and page layout are not rendered."},
  Operation{id:"epub-markdown",label:"Export EPUB text as Markdown",hint:"Create a new .md file with EPUB title, attribution, spine chapter headings, and escaped plain-text body content. Layout, formatting, navigation, tables, images and other media are not preserved."},
+ Operation{id:"markdown-epub",label:"Markdown to EPUB",hint:"Create a new EPUB 3 book from bounded UTF-8 Markdown, preserving headings, lists, tables, emphasis and other supported CommonMark structure. Parameter may be JSON with title and language. External links and images are omitted; this is structural conversion, not layout-preserving conversion."},
  #[cfg(feature="gui")]
  Operation{id:"epub-reader",label:"Read EPUB book",hint:"Open a native, offline plain-text reader with spine chapter navigation, bounded text pages, adjustable type size and recent books. Layout and embedded media are not rendered."},
  Operation{id:"compare-text",label:"Compare text files",hint:"Enter the second UTF-8 text file path as the parameter. Optional new .txt report."},
@@ -654,6 +656,15 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
             written = Some(r.output);
             warnings.push("This is a bounded structural text export, not layout-preserving conversion. It retains package title/creator/language and spine chapter boundaries but omits inline formatting, navigation, images, tables as layout, CSS, scripts and DRM-protected content.".into());
             markdown.chars().take(24000).collect()
+        }
+        "markdown-epub" => {
+            extension(&r.output, "epub")?;
+            let bytes = markdown_epub::convert(&r.input, &r.parameter, &j)?;
+            j.check()?;
+            write_new(&r.output, |file| file.write_all(&bytes).map_err(err))?;
+            written = Some(r.output);
+            warnings.push("Structural Markdown-to-EPUB conversion. Text, headings, emphasis, lists and tables are converted offline, but page layout is not preserved; images and external links are omitted. The EPUB contains generated styles and no fetched resources.".into());
+            format!("Created EPUB 3 book ({} KiB)", bytes.len().div_ceil(1024))
         }
         "epub-reader" => {
             #[cfg(feature = "gui")]

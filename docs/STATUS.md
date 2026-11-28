@@ -14,6 +14,7 @@ Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_
 | epub-inspect | Bounded EPUB package metadata/container/spine inspection through the native operation workspace | Source and fixtures added; hosted verification pending; not complete EPUB validation |
 | epub-text | Ordered plain-text extraction from declared UTF-8 XHTML spine items | Source and fixtures added; hosted verification pending; layout and non-text content omitted |
 | epub-markdown | Bounded EPUB package metadata and spine body text export to Markdown, with syntax escaping | Native operation and route fixture added; hosted verification pending; not layout-preserving conversion |
+| markdown-epub | Bounded CommonMark Markdown to self-contained EPUB 3 structural conversion using pulldown-cmark | Native operation and package fixtures added; hosted verification pending; link/image resources omitted, raw HTML escaped, not layout-preserving |
 | epub-reader | Native offline plain-text EPUB reader with chapter/spine navigation, bounded UTF-8 text pages, font-size controls, session recents, and background load/cancel | Implemented with source tests; hosted GUI and five-target verification pending; not a layout renderer |
 | compare-text | UTF-8 line changes with optional plain-text report | Linux integration fixture-tested |
 | citation-validate | Bounded CSL JSON bibliography validation | Linux route tests passed; hosted matrix pending |
