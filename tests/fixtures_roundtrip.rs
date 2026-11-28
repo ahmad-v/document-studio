@@ -60,6 +60,13 @@ fn pdf_information_fixture() {
     let report: serde_json::Value = serde_json::from_str(&outcome.preview).unwrap();
     assert_eq!(report["pages"], 2);
     assert_eq!(report["pdf_version"], "1.3");
+    assert_eq!(
+        report["file_bytes"],
+        std::fs::metadata("tests/fixtures/two-pages.pdf")
+            .unwrap()
+            .len()
+    );
+    assert!(report["title"].is_null());
 }
 
 #[test]

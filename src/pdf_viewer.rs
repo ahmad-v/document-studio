@@ -59,6 +59,7 @@ struct Viewer {
     split_range: String,
     preview: Option<image::Handle>,
     preview_size: Option<(u32, u32)>,
+    properties_summary: String,
     thumbnails: BoundedPageCache<image::Handle>,
     page_input: String,
     zoom: Option<f32>,
@@ -252,6 +253,7 @@ impl Viewer {
         self.page_input = "1".into();
         self.preview = None;
         self.preview_size = None;
+        self.properties_summary.clear();
         self.thumbnails = BoundedPageCache::default();
         self.zoom = None;
         self.request_page(1)
@@ -679,6 +681,18 @@ impl Viewer {
                             ));
                             self.preview_size = Some((batch.preview.width, batch.preview.height));
                             self.pages = batch.page_count;
+                            let properties = &batch.properties;
+                            self.properties_summary = format!(
+                                "{}  |  Author: {}  |  PDF {}  |  {} pages  |  {} bytes\nPage {}: {:.1} × {:.1} pt",
+                                properties.title.as_deref().unwrap_or("Untitled"),
+                                properties.author.as_deref().unwrap_or("Unknown"),
+                                properties.version,
+                                batch.page_count,
+                                properties.byte_length,
+                                batch.preview.page,
+                                batch.page_width_points,
+                                batch.page_height_points,
+                            );
                             for thumbnail in &batch.thumbnails {
                                 self.thumbnails.insert(
                                     thumbnail.page,
@@ -906,6 +920,7 @@ impl Viewer {
                 ))
                 .height(Length::Fixed(36.0)),
             text(&self.status),
+            text(&self.properties_summary).size(12),
             thumbnail_strip,
             scrollable(
                 container(content)
@@ -943,6 +958,7 @@ pub(super) fn run(path: PathBuf, initial_page: usize) -> std::result::Result<(),
         split_range: format!("1-{pages}"),
         preview: None,
         preview_size: None,
+        properties_summary: String::new(),
         thumbnails: BoundedPageCache::default(),
         page_input: initial_page.to_string(),
         zoom: None,
