@@ -1,7 +1,7 @@
 //! Bounded structural Markdown to EPUB 3 conversion.
 //!
 //! This is an offline text/structure conversion, not a page-layout converter.
-//! Remote links and image resources are intentionally omitted so generated books
+//! Link destinations and image resources are intentionally omitted so generated books
 //! never fetch content when opened by another reader.
 
 use localwright_core::{read_bounded, Error, Job, Result};
@@ -12,13 +12,13 @@ use std::{
 };
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
-const MAX_MARKDOWN_BYTES: u64 = 4 * 1024 * 1024;
+pub(crate) const MAX_MARKDOWN_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_EPUB_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Default)]
-struct Metadata {
-    title: Option<String>,
-    language: Option<String>,
+pub(crate) struct Metadata {
+    pub(crate) title: Option<String>,
+    pub(crate) language: Option<String>,
 }
 
 /// Build one self-contained EPUB 3 chapter from a Markdown source.
@@ -41,35 +41,7 @@ pub(crate) fn convert(path: &Path, metadata_json: &str, job: &Job) -> Result<Vec
         std::str::from_utf8(&source).map_err(|_| Error::input("Markdown input must be UTF-8"))?;
     job.check()?;
 
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_TABLES);
-    options.insert(Options::ENABLE_STRIKETHROUGH);
-    options.insert(Options::ENABLE_TASKLISTS);
-    let mut body = String::new();
-    let mut cancelled = false;
-    {
-        let events = Parser::new_ext(source, options)
-            .take_while(|_| {
-                cancelled = job.check().is_err();
-                !cancelled
-            })
-            .filter_map(|event| {
-                match event {
-                    // Keep visible text but discard navigation and image URLs. Markdown
-                    // raw HTML is rendered as escaped text, never interpreted as markup.
-                    Event::Start(Tag::Link { .. })
-                    | Event::End(TagEnd::Link)
-                    | Event::Start(Tag::Image { .. })
-                    | Event::End(TagEnd::Image) => None,
-                    Event::Html(text) | Event::InlineHtml(text) => Some(Event::Text(text)),
-                    other => Some(other),
-                }
-            });
-        html::push_html(&mut body, events);
-    }
-    if cancelled {
-        job.check()?;
-    }
+    let body = render_safe_html_body(source, job)?;
     let title = metadata.title.unwrap_or_else(|| default_title(path));
     let language = metadata.language.unwrap_or_else(|| "und".to_owned());
     let title_xml = xml_escape(&title);
@@ -131,21 +103,52 @@ pub(crate) fn convert(path: &Path, metadata_json: &str, job: &Job) -> Result<Vec
     Ok(bytes)
 }
 
-fn parse_metadata(json: &str) -> Result<Metadata> {
+pub(crate) fn render_safe_html_body(source: &str, job: &Job) -> Result<String> {
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_TASKLISTS);
+    let mut body = String::new();
+    let mut cancelled = false;
+    {
+        let events = Parser::new_ext(source, options)
+            .take_while(|_| {
+                cancelled = job.check().is_err();
+                !cancelled
+            })
+            .filter_map(|event| match event {
+                // Keep visible text but discard navigation and image URLs. Markdown
+                // raw HTML is rendered as escaped text, never interpreted as markup.
+                Event::Start(Tag::Link { .. })
+                | Event::End(TagEnd::Link)
+                | Event::Start(Tag::Image { .. })
+                | Event::End(TagEnd::Image) => None,
+                Event::Html(text) | Event::InlineHtml(text) => Some(Event::Text(text)),
+                other => Some(other),
+            });
+        html::push_html(&mut body, events);
+    }
+    if cancelled {
+        job.check()?;
+    }
+    Ok(body)
+}
+
+pub(crate) fn parse_metadata(json: &str) -> Result<Metadata> {
     if json.trim().is_empty() {
         return Ok(Metadata::default());
     }
     if json.len() > 4096 {
-        return Err(Error::input("EPUB metadata parameter exceeds 4 KiB"));
+        return Err(Error::input("Document metadata parameter exceeds 4 KiB"));
     }
     let value: serde_json::Value = serde_json::from_str(json)
-        .map_err(|error| Error::input(format!("Expected metadata JSON: {error}")))?;
+        .map_err(|error| Error::input(format!("Expected document metadata JSON: {error}")))?;
     let object = value
         .as_object()
-        .ok_or_else(|| Error::input("EPUB metadata must be a JSON object"))?;
+        .ok_or_else(|| Error::input("Document metadata must be a JSON object"))?;
     if object.keys().any(|key| key != "title" && key != "language") {
         return Err(Error::input(
-            "Only title and language EPUB metadata are supported",
+            "Only title and language metadata are supported",
         ));
     }
     let title = object
@@ -163,7 +166,7 @@ fn parse_metadata(json: &str) -> Result<Metadata> {
         .as_ref()
         .is_some_and(|value| value.chars().count() > 200)
     {
-        return Err(Error::input("EPUB title exceeds 200 characters"));
+        return Err(Error::input("Document title exceeds 200 characters"));
     }
     let language = object
         .get("language")
@@ -189,7 +192,7 @@ fn parse_metadata(json: &str) -> Result<Metadata> {
     Ok(Metadata { title, language })
 }
 
-fn default_title(path: &Path) -> String {
+pub(crate) fn default_title(path: &Path) -> String {
     path.file_stem()
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
@@ -197,7 +200,7 @@ fn default_title(path: &Path) -> String {
         .to_owned()
 }
 
-fn xml_escape(value: &str) -> String {
+pub(crate) fn xml_escape(value: &str) -> String {
     let mut output = String::with_capacity(value.len());
     for character in value.chars() {
         match character {
