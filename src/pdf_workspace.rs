@@ -1,3 +1,4 @@
+#[cfg(any(feature = "gui", test))]
 use std::collections::VecDeque;
 
 pub(crate) const MAX_DOCUMENT_BYTES: u64 = 32 * 1024 * 1024;
@@ -5,12 +6,16 @@ pub(crate) const MAX_DOCUMENT_PAGES: usize = 1000;
 pub(crate) const MAX_DOCUMENT_OBJECTS: usize = 100_000;
 pub(crate) const PREVIEW_MAX_EDGE: f32 = 1400.0;
 pub(crate) const PREVIEW_MAX_PIXELS: u32 = 1_500_000;
+#[cfg(any(feature = "gui", test))]
 pub(crate) const VISIBLE_THUMBNAILS: usize = 9;
+#[cfg(any(feature = "gui", test))]
 pub(crate) const THUMBNAIL_CACHE_CAPACITY: usize = 12;
+#[cfg(feature = "gui")]
 pub(crate) const THUMBNAIL_MAX_EDGE: u16 = 160;
 
 /// Move a selected 1-based position by one place without changing its page identity.
 /// The order is bounded by `MAX_DOCUMENT_PAGES`, matching the PDF loading limit.
+#[cfg(any(feature = "gui", test))]
 pub(crate) fn move_page(order: &mut [usize], position: usize, delta: isize) -> Option<usize> {
     if order.is_empty()
         || order.len() > MAX_DOCUMENT_PAGES
@@ -27,6 +32,7 @@ pub(crate) fn move_page(order: &mut [usize], position: usize, delta: isize) -> O
     Some(target)
 }
 
+#[cfg(any(feature = "gui", test))]
 pub(crate) fn serialize_page_order(order: &[usize]) -> Option<String> {
     if order.is_empty() || order.len() > MAX_DOCUMENT_PAGES {
         return None;
@@ -52,6 +58,7 @@ pub(crate) fn document_within_limits(byte_len: u64, pages: usize, objects: usize
     byte_len <= MAX_DOCUMENT_BYTES && pages <= MAX_DOCUMENT_PAGES && objects <= MAX_DOCUMENT_OBJECTS
 }
 
+#[cfg(any(feature = "gui", test))]
 pub(crate) fn page_window(current: usize, total: usize) -> Vec<usize> {
     if current == 0 || current > total || total == 0 {
         return Vec::new();
@@ -67,6 +74,7 @@ pub(crate) fn page_window(current: usize, total: usize) -> Vec<usize> {
     (start..=end).collect()
 }
 
+#[cfg(any(feature = "gui", test))]
 pub(crate) fn parse_page_selection(value: &str, total: usize) -> Option<usize> {
     if value.is_empty() || value.len() > 4 || !value.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
@@ -75,6 +83,7 @@ pub(crate) fn parse_page_selection(value: &str, total: usize) -> Option<usize> {
     (page > 0 && page <= total).then_some(page)
 }
 
+#[cfg(any(feature = "gui", test))]
 pub(crate) fn parse_page_range(value: &str, total: usize) -> Option<(usize, usize)> {
     if value.len() > 16 || total == 0 {
         return None;
@@ -85,6 +94,7 @@ pub(crate) fn parse_page_range(value: &str, total: usize) -> Option<(usize, usiz
     (start > 0 && start <= end && end <= total).then_some((start, end))
 }
 
+#[cfg(any(feature = "gui", test))]
 pub(crate) fn is_pdf_input(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -93,6 +103,7 @@ pub(crate) fn is_pdf_input(path: &std::path::Path) -> bool {
 
 /// Match the PDF handler's lowercase extension requirement and avoid direct input path reuse.
 /// The handler's no-overwrite writer is the authoritative check for any existing destination.
+#[cfg(any(feature = "gui", test))]
 pub(crate) fn is_new_pdf_output(
     source: &std::path::Path,
     second_input: Option<&std::path::Path>,
@@ -103,16 +114,19 @@ pub(crate) fn is_new_pdf_output(
         && second_input != Some(output)
 }
 
+#[cfg(any(feature = "gui", test))]
 pub(crate) fn merge_request_parameter(path: &std::path::Path) -> Option<String> {
     path.to_str().map(str::to_owned)
 }
 
 /// A small least-recently-used cache keyed by 1-based page number.
+#[cfg(any(feature = "gui", test))]
 #[derive(Debug)]
 pub(crate) struct BoundedPageCache<T> {
     entries: VecDeque<(usize, T)>,
 }
 
+#[cfg(any(feature = "gui", test))]
 impl<T> Default for BoundedPageCache<T> {
     fn default() -> Self {
         Self {
@@ -121,6 +135,7 @@ impl<T> Default for BoundedPageCache<T> {
     }
 }
 
+#[cfg(any(feature = "gui", test))]
 impl<T> BoundedPageCache<T> {
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
