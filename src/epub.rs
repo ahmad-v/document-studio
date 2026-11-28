@@ -72,6 +72,7 @@ pub fn extract_text(path: &Path, job: &Job) -> Result<String> {
         spine,
         members,
         mut archive,
+        ..
     } = load(path, job)?;
     let mut output = String::new();
     if let Some(title) = &title {
@@ -337,12 +338,12 @@ const fn hex(value: u8) -> Option<u8> {
     }
 }
 
-fn attr(reader: &NsReader<&[u8]>, element: &BytesStart<'_>, name: &[u8]) -> Result<Option<String>> {
+fn attr(element: &BytesStart<'_>, name: &str) -> Result<Option<String>> {
     for attribute in element.attributes().with_checks(true) {
         let attribute = attribute.map_err(super::err)?;
         if attribute.key.local_name().as_ref() == name {
             return attribute
-                .decode_and_unescape_value(reader.decoder())
+                .normalized_value(XmlVersion::Implicit1_0)
                 .map(|value| Some(value.into_owned()))
                 .map_err(super::err);
         }
@@ -376,15 +377,15 @@ fn parse_container(bytes: &[u8], job: &Job) -> Result<String> {
                 }
                 let name = element.local_name();
                 if depth == 1 {
-                    if !bound(&namespace, CONTAINER_NS) || name.as_ref() != b"container" {
+                    if !bound(&namespace, CONTAINER_NS) || name.as_ref() != "container" {
                         return Err(Error::input("Invalid EPUB container root"));
                     }
                     found_root = true;
                 }
-                if bound(&namespace, CONTAINER_NS) && name.as_ref() == b"rootfile" {
-                    let path = attr(&reader, &element, b"full-path")?
+                if bound(&namespace, CONTAINER_NS) && name.as_ref() == "rootfile" {
+                    let path = attr(&element, "full-path")?
                         .ok_or_else(|| Error::input("EPUB rootfile is missing full-path"))?;
-                    let media_type = attr(&reader, &element, b"media-type")?;
+                    let media_type = attr(&element, "media-type")?;
                     if rootfile.is_none()
                         && media_type
                             .as_deref()
@@ -446,34 +447,33 @@ fn parse_opf(
                 }
                 let name = element.local_name();
                 if depth == 1 {
-                    if !bound(&namespace, OPF_NS) || name.as_ref() != b"package" {
+                    if !bound(&namespace, OPF_NS) || name.as_ref() != "package" {
                         return Err(Error::input("Invalid EPUB package document root"));
                     }
                     found_root = true;
                 }
                 if bound(&namespace, OPF_NS) {
                     match name.as_ref() {
-                        b"metadata" => metadata_depth = Some(depth),
-                        b"manifest" => manifest_depth = Some(depth),
-                        b"spine" => spine_depth = Some(depth),
-                        b"item" if manifest_depth.is_some() => {
-                            let id = attr(&reader, &element, b"id")?.ok_or_else(|| {
+                        "metadata" => metadata_depth = Some(depth),
+                        "manifest" => manifest_depth = Some(depth),
+                        "spine" => spine_depth = Some(depth),
+                        "item" if manifest_depth.is_some() => {
+                            let id = attr(&element, "id")?.ok_or_else(|| {
                                 Error::input("EPUB manifest item is missing an id")
                             })?;
-                            let href = attr(&reader, &element, b"href")?.ok_or_else(|| {
+                            let href = attr(&element, "href")?.ok_or_else(|| {
                                 Error::input("EPUB manifest item is missing href")
                             })?;
-                            let media_type =
-                                attr(&reader, &element, b"media-type")?.ok_or_else(|| {
-                                    Error::input("EPUB manifest item is missing media-type")
-                                })?;
+                            let media_type = attr(&element, "media-type")?.ok_or_else(|| {
+                                Error::input("EPUB manifest item is missing media-type")
+                            })?;
                             let path = resolve_href(opf_path, &href)?;
                             if manifest.insert(id, Item { path, media_type }).is_some() {
                                 return Err(Error::input("EPUB manifest contains duplicate ids"));
                             }
                         }
-                        b"itemref" if spine_depth.is_some() => {
-                            let idref = attr(&reader, &element, b"idref")?
+                        "itemref" if spine_depth.is_some() => {
+                            let idref = attr(&element, "idref")?
                                 .ok_or_else(|| Error::input("EPUB spine item is missing idref"))?;
                             spine_ids.push(idref);
                             if spine_ids.len() > MAX_SPINE_ITEMS {
@@ -486,7 +486,7 @@ fn parse_opf(
                         _ => {}
                     }
                 } else if bound(&namespace, DC_NS) && metadata_depth.is_some() {
-                    if matches!(name.as_ref(), b"title" | b"creator" | b"language") {
+                    if matches!(name.as_ref(), "title" | "creator" | "language") {
                         text_target = Some((depth, String::new()));
                     }
                 }
@@ -523,9 +523,9 @@ fn parse_opf(
                         .ok_or_else(|| Error::input("EPUB metadata parser lost its text state"))?;
                     let text = value.trim().to_owned();
                     match local.as_ref() {
-                        b"title" if title.is_none() => title = Some(text),
-                        b"creator" if creators.len() < 64 => creators.push(text),
-                        b"language" if language.is_none() => language = Some(text),
+                        "title" if title.is_none() => title = Some(text),
+                        "creator" if creators.len() < 64 => creators.push(text),
+                        "language" if language.is_none() => language = Some(text),
                         _ => {}
                     }
                 }
@@ -586,22 +586,22 @@ fn extract_xhtml(xml: &str, job: &Job) -> Result<String> {
                 }
                 let name = element.local_name();
                 if depth == 1 {
-                    if !bound(&namespace, XHTML_NS) || name.as_ref() != b"html" {
+                    if !bound(&namespace, XHTML_NS) || name.as_ref() != "html" {
                         return Err(Error::input("EPUB spine document is not XHTML"));
                     }
                     found_root = true;
                 }
                 if bound(&namespace, XHTML_NS) {
-                    if depth == 2 && name.as_ref() == b"body" {
+                    if depth == 2 && name.as_ref() == "body" {
                         body_depth = Some(depth);
                         found_body = true;
                     }
-                    if body_depth.is_some() && matches!(name.as_ref(), b"script" | b"style") {
+                    if body_depth.is_some() && matches!(name.as_ref(), "script" | "style") {
                         ignore_depth = Some(depth);
                     }
                     if body_depth.is_some()
                         && ignore_depth.is_none()
-                        && matches!(name.as_ref(), b"br" | b"hr")
+                        && matches!(name.as_ref(), "br" | "hr")
                     {
                         append_bounded(&mut output, "\n", job)?;
                     }
@@ -638,17 +638,17 @@ fn extract_xhtml(xml: &str, job: &Job) -> Result<String> {
                     && bound(&namespace, XHTML_NS)
                     && matches!(
                         name.as_ref(),
-                        b"p" | b"div"
-                            | b"li"
-                            | b"section"
-                            | b"h1"
-                            | b"h2"
-                            | b"h3"
-                            | b"h4"
-                            | b"h5"
-                            | b"h6"
-                            | b"blockquote"
-                            | b"tr"
+                        "p" | "div"
+                            | "li"
+                            | "section"
+                            | "h1"
+                            | "h2"
+                            | "h3"
+                            | "h4"
+                            | "h5"
+                            | "h6"
+                            | "blockquote"
+                            | "tr"
                     )
                 {
                     if !output.ends_with('\n') {
