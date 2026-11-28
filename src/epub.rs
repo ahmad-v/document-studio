@@ -24,6 +24,7 @@ const MAX_EXPANDED_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_PACKAGE_XML_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_SPINE_ITEMS: usize = 2000;
 const MAX_EXTRACTED_BYTES: usize = 8 * 1024 * 1024;
+const MAX_MARKDOWN_BYTES: usize = 16 * 1024 * 1024;
 const EPUB_MIMETYPE: &str = "application/epub+zip";
 const CONTAINER_NS: &str = "urn:oasis:names:tc:opendocument:xmlns:container";
 const OPF_NS: &str = "http://www.idpf.org/2007/opf";
@@ -105,6 +106,63 @@ pub fn extract_text(path: &Path, job: &Job) -> Result<String> {
         }
     }
     Ok(output)
+}
+
+/// Export bounded EPUB body text as Markdown with package and spine headings.
+/// Inline formatting, navigation documents, images and layout are not preserved.
+pub fn export_markdown(path: &Path, job: &Job) -> Result<String> {
+    let book = read_book(path, job)?;
+    let mut output = String::new();
+    if let Some(title) = &book.title {
+        append_markdown(&mut output, "# ", job)?;
+        append_markdown_escaped(&mut output, title, job)?;
+        append_markdown(&mut output, "\n\n", job)?;
+    }
+    if !book.creators.is_empty() {
+        append_markdown(&mut output, "Authors: ", job)?;
+        append_markdown_escaped(&mut output, &book.creators.join(", "), job)?;
+        append_markdown(&mut output, "\n\n", job)?;
+    }
+    if let Some(language) = &book.language {
+        append_markdown(&mut output, "Language: ", job)?;
+        append_markdown_escaped(&mut output, language, job)?;
+        append_markdown(&mut output, "\n\n", job)?;
+    }
+    for chapter in &book.chapters {
+        job.check()?;
+        append_markdown(&mut output, "## ", job)?;
+        append_markdown_escaped(&mut output, &chapter.label, job)?;
+        append_markdown(&mut output, "\n\n", job)?;
+        append_markdown_escaped(&mut output, &chapter.text, job)?;
+        if !output.ends_with('\n') {
+            append_markdown(&mut output, "\n", job)?;
+        }
+        append_markdown(&mut output, "\n", job)?;
+    }
+    Ok(output)
+}
+
+fn append_markdown(output: &mut String, text: &str, job: &Job) -> Result<()> {
+    job.check()?;
+    if output.len().saturating_add(text.len()) > MAX_MARKDOWN_BYTES {
+        return Err(Error::new(
+            ErrorKind::Limit,
+            "EPUB Markdown output exceeds 16 MiB",
+        ));
+    }
+    output.push_str(text);
+    Ok(())
+}
+
+fn append_markdown_escaped(output: &mut String, text: &str, job: &Job) -> Result<()> {
+    for character in text.chars() {
+        if "\\`*_{}[]<>#+-.!|".contains(character) {
+            append_markdown(output, "\\", job)?;
+        }
+        let mut encoded = [0; 4];
+        append_markdown(output, character.encode_utf8(&mut encoded), job)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn read_book(path: &Path, job: &Job) -> Result<EpubBook> {
@@ -871,6 +929,40 @@ mod tests {
                 operation: "epub-text".into(),
                 input: dir.path().join("book.epub"),
                 output: text,
+                ..Default::default()
+            },
+            Job::new(),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn epub_markdown_export_uses_spine_order_and_escapes_markdown_syntax() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("book.epub");
+        let output = dir.path().join("book.md");
+        let xhtml = XHTML.replace("<h1>Hello</h1>", "<h1># Hello</h1>");
+        fixture(&input, OPF, &xhtml);
+        let outcome = crate::handle(
+            localwright_core::Request {
+                operation: "epub-markdown".into(),
+                input,
+                output: output.clone(),
+                ..Default::default()
+            },
+            Job::new(),
+        )
+        .unwrap();
+        let markdown = std::fs::read_to_string(&output).unwrap();
+        assert!(markdown.starts_with("# Sample & Book\n\nAuthors: Author\n\nLanguage: en"));
+        assert!(markdown.contains("## chapter 1\n\n\\# Hello"));
+        assert!(markdown.contains("Fish & chips"));
+        assert_eq!(outcome.written.as_deref(), Some(output.as_path()));
+        assert!(crate::handle(
+            localwright_core::Request {
+                operation: "epub-markdown".into(),
+                input: dir.path().join("book.epub"),
+                output,
                 ..Default::default()
             },
             Job::new(),

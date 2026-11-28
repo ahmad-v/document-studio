@@ -14,8 +14,9 @@ use localwright_core::*;
 use lopdf::{dictionary, Document, Object};
 use pdf_workspace::{
     document_within_limits, MAX_DOCUMENT_BYTES, PREVIEW_MAX_EDGE, PREVIEW_MAX_PIXELS,
-    THUMBNAIL_MAX_EDGE, VISIBLE_THUMBNAILS,
 };
+#[cfg(feature = "gui")]
+use pdf_workspace::{THUMBNAIL_MAX_EDGE, VISIBLE_THUMBNAILS};
 use std::{io::Write, path::Path};
 use zip::{write::SimpleFileOptions, ZipWriter};
 pub const OPERATIONS:&[Operation]=&[
@@ -24,6 +25,7 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"docx-text",label:"DOCX body text",hint:"Extract plain text from a DOCX document body. Optional new .txt output."},
  Operation{id:"epub-inspect",label:"Inspect EPUB package",hint:"Inspect bounded EPUB container, metadata and spine structure. Optional new .json report. This is not a complete EPUB conformance validator or layout renderer."},
  Operation{id:"epub-text",label:"Extract EPUB text",hint:"Extract UTF-8 XHTML body text in reading order. Optional new .txt output. Styles, images, scripts, navigation and page layout are not rendered."},
+ Operation{id:"epub-markdown",label:"Export EPUB text as Markdown",hint:"Create a new .md file with EPUB title, attribution, spine chapter headings, and escaped plain-text body content. Layout, formatting, navigation, tables, images and other media are not preserved."},
  #[cfg(feature="gui")]
  Operation{id:"epub-reader",label:"Read EPUB book",hint:"Open a native, offline plain-text reader with spine chapter navigation, bounded text pages, adjustable type size and recent books. Layout and embedded media are not rendered."},
  Operation{id:"compare-text",label:"Compare text files",hint:"Enter the second UTF-8 text file path as the parameter. Optional new .txt report."},
@@ -132,6 +134,7 @@ fn load_pdf_bytes(bytes: &[u8]) -> Result<Document> {
 
 #[derive(Debug)]
 pub(crate) struct PagePixels {
+    #[cfg(feature = "gui")]
     pub(crate) page: usize,
     pub(crate) width: u32,
     pub(crate) height: u32,
@@ -141,10 +144,14 @@ pub(crate) struct PagePixels {
 #[derive(Debug)]
 pub(crate) struct ViewerBatch {
     pub(crate) page_count: usize,
+    #[cfg(feature = "gui")]
     pub(crate) properties: PdfProperties,
+    #[cfg(feature = "gui")]
     pub(crate) page_width_points: f32,
+    #[cfg(feature = "gui")]
     pub(crate) page_height_points: f32,
     pub(crate) preview: PagePixels,
+    #[cfg(feature = "gui")]
     pub(crate) thumbnails: Vec<PagePixels>,
 }
 
@@ -197,6 +204,8 @@ fn render_page_bitmap(
     max_edge: u16,
     job: &Job,
 ) -> Result<PagePixels> {
+    #[cfg(not(feature = "gui"))]
+    let _ = page_number;
     let (page_width, page_height) = page.render_dimensions();
     let page_area = page_width * page_height;
     if !page_width.is_finite()
@@ -242,6 +251,7 @@ fn render_page_bitmap(
         ));
     }
     Ok(PagePixels {
+        #[cfg(feature = "gui")]
         page: page_number,
         width,
         height,
@@ -255,12 +265,14 @@ pub(crate) fn render_viewer_batch(
     thumbnail_pages: &[usize],
     job: &Job,
 ) -> Result<ViewerBatch> {
+    #[cfg(feature = "gui")]
     if thumbnail_pages.len() > VISIBLE_THUMBNAILS {
         return Err(Error::input(
             "Thumbnail batch exceeds the bounded page window",
         ));
     }
     let bytes = read_bounded(path, MAX_DOCUMENT_BYTES)?;
+    #[cfg(feature = "gui")]
     let byte_length = bytes.len() as u64;
     let document =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_pdf_bytes(&bytes)))
@@ -271,12 +283,15 @@ pub(crate) fn render_viewer_batch(
     if page_number == 0 || page_number > page_count {
         return Err(Error::input("Choose an existing 1-based PDF page number"));
     }
+    #[cfg(feature = "gui")]
     if thumbnail_pages
         .iter()
         .any(|page| *page == 0 || *page > page_count)
     {
         return Err(Error::input("Thumbnail page selection is out of range"));
     }
+    #[cfg(not(feature = "gui"))]
+    let _ = thumbnail_pages;
     job.check()?;
     let pdf = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         hayro::hayro_syntax::Pdf::new(bytes)
@@ -287,10 +302,14 @@ pub(crate) fn render_viewer_batch(
     let page = pages
         .get(page_number - 1)
         .ok_or_else(|| Error::input("PDF renderer could not find the requested page"))?;
+    #[cfg(feature = "gui")]
     let (page_width_points, page_height_points) = page.render_dimensions();
+    #[cfg(feature = "gui")]
     let properties = pdf_properties(&document, byte_length);
     let preview = render_page_bitmap(page, page_number, PREVIEW_MAX_EDGE as u16, job)?;
+    #[cfg(feature = "gui")]
     let mut thumbnails = Vec::with_capacity(thumbnail_pages.len());
+    #[cfg(feature = "gui")]
     for thumbnail_page in thumbnail_pages {
         job.check()?;
         let Some(page) = pages.get(thumbnail_page - 1) else {
@@ -303,10 +322,14 @@ pub(crate) fn render_viewer_batch(
     }
     Ok(ViewerBatch {
         page_count,
+        #[cfg(feature = "gui")]
         properties,
+        #[cfg(feature = "gui")]
         page_width_points,
+        #[cfg(feature = "gui")]
         page_height_points,
         preview,
+        #[cfg(feature = "gui")]
         thumbnails,
     })
 }
@@ -620,6 +643,15 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
                 );
             }
             preview
+        }
+        "epub-markdown" => {
+            extension(&r.output, "md")?;
+            let markdown = epub::export_markdown(&r.input, &j)?;
+            j.check()?;
+            write_bytes(&r.output, markdown.as_bytes())?;
+            written = Some(r.output);
+            warnings.push("This is a bounded structural text export, not layout-preserving conversion. It retains package title/creator/language and spine chapter boundaries but omits inline formatting, navigation, images, tables as layout, CSS, scripts and DRM-protected content.".into());
+            markdown.chars().take(24000).collect()
         }
         "epub-reader" => {
             #[cfg(feature = "gui")]
