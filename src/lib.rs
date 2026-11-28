@@ -24,6 +24,7 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"docx-text",label:"DOCX body text",hint:"Extract plain text from a DOCX document body. Optional new .txt output."},
  Operation{id:"epub-inspect",label:"Inspect EPUB package",hint:"Inspect bounded EPUB container, metadata and spine structure. Optional new .json report. This is not a complete EPUB conformance validator or layout renderer."},
  Operation{id:"epub-text",label:"Extract EPUB text",hint:"Extract UTF-8 XHTML body text in reading order. Optional new .txt output. Styles, images, scripts, navigation and page layout are not rendered."},
+ Operation{id:"epub-markdown",label:"Export EPUB text as Markdown",hint:"Create a new .md file with EPUB title, attribution, spine chapter headings, and escaped plain-text body content. Layout, formatting, navigation, tables, images and other media are not preserved."},
  #[cfg(feature="gui")]
  Operation{id:"epub-reader",label:"Read EPUB book",hint:"Open a native, offline plain-text reader with spine chapter navigation, bounded text pages, adjustable type size and recent books. Layout and embedded media are not rendered."},
  Operation{id:"compare-text",label:"Compare text files",hint:"Enter the second UTF-8 text file path as the parameter. Optional new .txt report."},
@@ -620,6 +621,15 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
                 );
             }
             preview
+        }
+        "epub-markdown" => {
+            extension(&r.output, "md")?;
+            let markdown = epub::export_markdown(&r.input, &j)?;
+            j.check()?;
+            write_bytes(&r.output, markdown.as_bytes())?;
+            written = Some(r.output);
+            warnings.push("This is a bounded structural text export, not layout-preserving conversion. It retains package title/creator/language and spine chapter boundaries but omits inline formatting, navigation, images, tables as layout, CSS, scripts and DRM-protected content.".into());
+            markdown.chars().take(24000).collect()
         }
         "epub-reader" => {
             #[cfg(feature = "gui")]

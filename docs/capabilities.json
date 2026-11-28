@@ -87,6 +87,13 @@
       "fixture_status": "Added reading-order, XML entity and script-exclusion fixtures; hosted verification pending"
     },
     {
+      "operation": "epub-markdown",
+      "description": "Bounded Markdown export of EPUB package metadata, spine chapter headings and escaped plain-text chapter bodies; no layout, styling, navigation, image or media conversion",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "Added native operation-route fixture for metadata, chapter order, Markdown escaping and no-overwrite; hosted verification pending"
+    },
+    {
       "operation": "epub-reader",
       "description": "Native offline EPUB plain-text reader with chapter navigation, bounded UTF-8-safe text pages, adjustable text size and session recents; no layout rendering",
       "status": "implemented-unverified",
