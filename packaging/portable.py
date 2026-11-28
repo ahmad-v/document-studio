@@ -17,6 +17,17 @@ from package import CFG, R, TARGETS, check_binary, payload, validate_host
 
 def stage_ocr(source, bundle, target):
     """Stage a reviewed Linux OCR pack without including unrelated source files."""
+
+    def digest(path, expected, limit):
+        if not isinstance(expected, str) or len(expected) != 64:
+            raise ValueError(f"OCR provenance has no valid SHA-256 for {path.name}")
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > limit:
+            raise ValueError(f"Invalid or oversized OCR provenance file: {path.name}")
+        with path.open("rb") as stream:
+            actual = hashlib.file_digest(stream, "sha256").hexdigest()
+        if actual != expected:
+            raise ValueError(f"OCR provenance SHA-256 does not match {path.name}")
+
     required_files = (
         "tesseract", "libraries.json", "model-provenance.json",
         "tessdata/eng.traineddata",
@@ -35,21 +46,19 @@ def stage_ocr(source, bundle, target):
             raise ValueError(f"Unexpected or missing OCR pack files in {directory.name}")
 
     provenance_path = source / "model-provenance.json"
+    if provenance_path.is_symlink() or provenance_path.stat().st_size > 64 * 1024:
+        raise ValueError("Invalid or oversized OCR provenance record")
     provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
     if provenance.get("schema_version") != 1:
         raise ValueError("Unsupported OCR provenance schema")
     checks = {
-        "tesseract": provenance.get("engine", {}).get("binary_sha256"),
-        "tessdata/eng.traineddata": provenance.get("model", {}).get("sha256"),
-        "libraries.json": provenance.get("private_library_manifest_sha256"),
-        "notices/Tessdata-fast-LICENSE": provenance.get("model", {}).get("license_sha256"),
+        "tesseract": (provenance.get("engine", {}).get("binary_sha256"), 64 * 1024 * 1024),
+        "tessdata/eng.traineddata": (provenance.get("model", {}).get("sha256"), 64 * 1024 * 1024),
+        "libraries.json": (provenance.get("private_library_manifest_sha256"), 64 * 1024),
+        "notices/Tessdata-fast-LICENSE": (provenance.get("model", {}).get("license_sha256"), 64 * 1024),
     }
-    for relative, expected in checks.items():
-        if not isinstance(expected, str) or len(expected) != 64:
-            raise ValueError(f"OCR provenance has no valid SHA-256 for {relative}")
-        digest = hashlib.sha256((source / relative).read_bytes()).hexdigest()
-        if digest != expected:
-            raise ValueError(f"OCR provenance SHA-256 does not match {relative}")
+    for relative, (expected, limit) in checks.items():
+        digest(source / relative, expected, limit)
 
     files = list(required_files)
     for name in ("lib", "notices"):
