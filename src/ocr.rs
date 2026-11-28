@@ -1,8 +1,7 @@
 //! Experimental PNG OCR through an application-private Tesseract executable.
 
-#[cfg(not(target_os = "windows"))]
 use localwright_core::{
-    engine::{EngineInvocation, EngineRuntime, EngineSpec},
+    engine::{EngineInvocation, EngineRunOptions, EngineRuntime, EngineSpec},
     Capability,
 };
 use localwright_core::{read_bounded, Error, ErrorKind, Job, Result};
@@ -202,11 +201,6 @@ fn run(input: &Path, pdf: bool, job: &Job) -> Result<Vec<u8>> {
             job,
         );
     }
-    #[cfg(target_os = "windows")]
-    // Preserve CREATE_NO_WINDOW until the shared runtime exposes this Windows launch option.
-    return run_direct(&executable, &model, &image, pdf, output_limit, job);
-
-    #[cfg(not(target_os = "windows"))]
     run_with_engine_runtime(
         RuntimeRequest {
             executable,
@@ -222,7 +216,6 @@ fn run(input: &Path, pdf: bool, job: &Job) -> Result<Vec<u8>> {
     )
 }
 
-#[cfg(not(target_os = "windows"))]
 struct RuntimeRequest<'a> {
     executable: PathBuf,
     model: PathBuf,
@@ -234,7 +227,6 @@ struct RuntimeRequest<'a> {
     output_limit: u64,
 }
 
-#[cfg(not(target_os = "windows"))]
 fn run_with_engine_runtime(request: RuntimeRequest<'_>, job: &Job) -> Result<Vec<u8>> {
     let RuntimeRequest {
         executable,
@@ -253,6 +245,8 @@ fn run_with_engine_runtime(request: RuntimeRequest<'_>, job: &Job) -> Result<Vec
         #[cfg(target_os = "linux")]
         return run_direct(&executable, &model, &image, pdf, output_limit, None, job);
         #[cfg(target_os = "macos")]
+        return run_direct(&executable, &model, &image, pdf, output_limit, job);
+        #[cfg(target_os = "windows")]
         return run_direct(&executable, &model, &image, pdf, output_limit, job);
     }
     let spec = tesseract_engine_spec(
@@ -287,7 +281,7 @@ fn run_with_engine_runtime(request: RuntimeRequest<'_>, job: &Job) -> Result<Vec
     if pdf {
         args.extend(["-c".into(), "tessedit_create_pdf=1".into()]);
     }
-    let output = engine.run(
+    let output = engine.run_with_options(
         EngineInvocation {
             args,
             environment: [
@@ -298,13 +292,15 @@ fn run_with_engine_runtime(request: RuntimeRequest<'_>, job: &Job) -> Result<Vec
             .collect(),
             ..EngineInvocation::default()
         },
+        EngineRunOptions {
+            hide_console: cfg!(target_os = "windows"),
+        },
         job,
     )?;
     job.check()?;
     Ok(output.stdout)
 }
 
-#[cfg(not(target_os = "windows"))]
 fn tesseract_engine_spec(executable_name: &str, sha256: &str, output_limit: usize) -> EngineSpec {
     EngineSpec {
         id: "document-tesseract".into(),
