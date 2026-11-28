@@ -40,7 +40,7 @@
     },
     {
       "operation": "ocr-png-pdf",
-      "description": "One-page searchable PDF from PNG with private English OCR",
+      "description": "One-page searchable PDF from PNG using a hash-verified application-private English OCR pack and Localwright EngineRuntime where supported",
       "status": "implemented-unverified",
       "targets": [
         "x86_64-unknown-linux-gnu"
@@ -49,7 +49,7 @@
     },
     {
       "operation": "ocr-png",
-      "description": "Experimental English OCR for PNG with optional verified private engine",
+      "description": "Experimental English PNG OCR with a hash-verified application-private Tesseract pack; uses Localwright EngineRuntime where loader and platform launch requirements permit",
       "status": "implemented-unverified",
       "targets": [
         "x86_64-unknown-linux-gnu"
@@ -76,14 +76,14 @@
     },
     {
       "operation": "pdf-info",
-      "description": "PDF version and page count; optional JSON",
+      "description": "PDF version, page count, file size and available Info-dictionary metadata; optional JSON. Native preview shows selected-page dimensions.",
       "status": "implemented-unverified",
       "targets": [],
-      "fixture_status": "Linux fixture passed"
+      "fixture_status": "Unicode metadata, control-character filtering, optional-field handling and file-size unit tests passed; PDF information fixture and default GUI library check passed locally; hosted matrix pending."
     },
     {
       "operation": "pdf-preview",
-      "description": "Render a selected PDF page to a bounded PNG and open the native page navigation and zoom workspace",
+      "description": "Render a bounded PDF page preview and open the native workspace with bounded thumbnails, selected-page extraction and rotation, visual page-order controls, and save-to-new-copy reordering",
       "status": "implemented-unverified",
       "targets": [
         "x86_64-unknown-linux-gnu"
@@ -106,14 +106,14 @@
     },
     {
       "operation": "pdf-split",
-      "description": "Experimental page range",
+      "description": "Experimental native inclusive page-range extraction to one new page-only PDF copy; source and existing outputs are preserved",
       "status": "implemented-unverified",
       "targets": [],
       "fixture_status": "not run"
     },
     {
       "operation": "pdf-reorder",
-      "description": "Experimental page-only PDF reordering",
+      "description": "Experimental page-only PDF reordering from either a complete CLI page order or the native selected-page earlier/later controls; saves to a new path",
       "status": "implemented-unverified",
       "targets": [
         "x86_64-unknown-linux-gnu"
@@ -131,7 +131,7 @@
     },
     {
       "operation": "pdf-merge",
-      "description": "Experimental two-document page-only merge",
+      "description": "Experimental native page-only merge of the open PDF and a second selected PDF to a new output; UTF-8 second paths required; metadata and annotations may be omitted",
       "status": "implemented-unverified",
       "targets": [],
       "fixture_status": "not run"

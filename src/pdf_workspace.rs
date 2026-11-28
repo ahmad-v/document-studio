@@ -9,6 +9,45 @@ pub(crate) const VISIBLE_THUMBNAILS: usize = 9;
 pub(crate) const THUMBNAIL_CACHE_CAPACITY: usize = 12;
 pub(crate) const THUMBNAIL_MAX_EDGE: u16 = 160;
 
+/// Move a selected 1-based position by one place without changing its page identity.
+/// The order is bounded by `MAX_DOCUMENT_PAGES`, matching the PDF loading limit.
+pub(crate) fn move_page(order: &mut [usize], position: usize, delta: isize) -> Option<usize> {
+    if order.is_empty()
+        || order.len() > MAX_DOCUMENT_PAGES
+        || position == 0
+        || position > order.len()
+    {
+        return None;
+    }
+    let target = position.checked_add_signed(delta)?;
+    if target == 0 || target > order.len() || delta.unsigned_abs() != 1 {
+        return None;
+    }
+    order.swap(position - 1, target - 1);
+    Some(target)
+}
+
+pub(crate) fn serialize_page_order(order: &[usize]) -> Option<String> {
+    if order.is_empty() || order.len() > MAX_DOCUMENT_PAGES {
+        return None;
+    }
+    let mut seen = vec![false; order.len()];
+    for page in order {
+        let slot = page.checked_sub(1).and_then(|page| seen.get_mut(page))?;
+        if *slot {
+            return None;
+        }
+        *slot = true;
+    }
+    Some(
+        order
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+}
+
 pub(crate) fn document_within_limits(byte_len: u64, pages: usize, objects: usize) -> bool {
     byte_len <= MAX_DOCUMENT_BYTES && pages <= MAX_DOCUMENT_PAGES && objects <= MAX_DOCUMENT_OBJECTS
 }
@@ -34,6 +73,38 @@ pub(crate) fn parse_page_selection(value: &str, total: usize) -> Option<usize> {
     }
     let page = value.parse::<usize>().ok()?;
     (page > 0 && page <= total).then_some(page)
+}
+
+pub(crate) fn parse_page_range(value: &str, total: usize) -> Option<(usize, usize)> {
+    if value.len() > 16 || total == 0 {
+        return None;
+    }
+    let (start, end) = value.split_once('-')?;
+    let start = start.trim().parse::<usize>().ok()?;
+    let end = end.trim().parse::<usize>().ok()?;
+    (start > 0 && start <= end && end <= total).then_some((start, end))
+}
+
+pub(crate) fn is_pdf_input(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+}
+
+/// Match the PDF handler's lowercase extension requirement and avoid direct input path reuse.
+/// The handler's no-overwrite writer is the authoritative check for any existing destination.
+pub(crate) fn is_new_pdf_output(
+    source: &std::path::Path,
+    second_input: Option<&std::path::Path>,
+    output: &std::path::Path,
+) -> bool {
+    output.extension().and_then(|extension| extension.to_str()) == Some("pdf")
+        && output != source
+        && second_input != Some(output)
+}
+
+pub(crate) fn merge_request_parameter(path: &std::path::Path) -> Option<String> {
+    path.to_str().map(str::to_owned)
 }
 
 /// A small least-recently-used cache keyed by 1-based page number.
@@ -113,6 +184,49 @@ mod tests {
     }
 
     #[test]
+    fn split_ranges_and_output_paths_are_validated_for_the_native_workflow() {
+        assert_eq!(parse_page_range("1-2", 2), Some((1, 2)));
+        assert_eq!(parse_page_range(" 2 - 4 ", 4), Some((2, 4)));
+        assert_eq!(parse_page_range("0-2", 4), None);
+        assert_eq!(parse_page_range("3-2", 4), None);
+        assert_eq!(parse_page_range("1-5", 4), None);
+        assert_eq!(parse_page_range("1-2-3", 4), None);
+        assert_eq!(parse_page_range("1-2", 0), None);
+
+        let source = std::path::Path::new("source.pdf");
+        let second = std::path::Path::new("second.pdf");
+        assert!(is_pdf_input(std::path::Path::new("SECOND.PDF")));
+        assert!(is_new_pdf_output(
+            source,
+            Some(second),
+            std::path::Path::new("merged.pdf")
+        ));
+        assert!(!is_new_pdf_output(
+            source,
+            Some(second),
+            std::path::Path::new("source.pdf")
+        ));
+        assert!(!is_new_pdf_output(
+            source,
+            Some(second),
+            std::path::Path::new("second.pdf")
+        ));
+        assert!(!is_new_pdf_output(
+            source,
+            None,
+            std::path::Path::new("output.PDF")
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn merge_path_parameter_rejects_non_utf8_paths_instead_of_lossy_conversion() {
+        use std::os::unix::ffi::OsStringExt;
+        let path = std::path::PathBuf::from(std::ffi::OsString::from_vec(vec![b'/', 0xff]));
+        assert!(merge_request_parameter(&path).is_none());
+    }
+
+    #[test]
     fn thumbnail_cache_is_bounded_and_evicts_the_least_recently_used() {
         let mut cache = BoundedPageCache::default();
         for page in 1..=THUMBNAIL_CACHE_CAPACITY {
@@ -138,5 +252,29 @@ mod tests {
         assert!(!document_within_limits(MAX_DOCUMENT_BYTES + 1, 1, 1));
         assert!(!document_within_limits(1, MAX_DOCUMENT_PAGES + 1, 1));
         assert!(!document_within_limits(1, 1, MAX_DOCUMENT_OBJECTS + 1));
+    }
+
+    #[test]
+    fn page_reordering_moves_one_selected_page_and_serializes_a_permutation() {
+        let mut order = vec![1, 2, 3, 4];
+        assert_eq!(move_page(&mut order, 3, -1), Some(2));
+        assert_eq!(order, [1, 3, 2, 4]);
+        assert_eq!(move_page(&mut order, 2, 1), Some(3));
+        assert_eq!(order, [1, 2, 3, 4]);
+        assert_eq!(serialize_page_order(&order).as_deref(), Some("1,2,3,4"));
+        assert_eq!(serialize_page_order(&[3, 1, 2]).as_deref(), Some("3,1,2"));
+        assert_eq!(serialize_page_order(&[1, 1]), None);
+        assert_eq!(serialize_page_order(&[1, 3]), None);
+    }
+
+    #[test]
+    fn page_reordering_rejects_invalid_positions_and_document_sizes() {
+        let mut order = vec![1, 2];
+        assert_eq!(move_page(&mut order, 1, -1), None);
+        assert_eq!(move_page(&mut order, 2, 1), None);
+        assert_eq!(move_page(&mut order, 0, 1), None);
+        assert_eq!(move_page(&mut order, 1, 2), None);
+        let mut oversized = vec![1; MAX_DOCUMENT_PAGES + 1];
+        assert_eq!(move_page(&mut oversized, 1, 1), None);
     }
 }

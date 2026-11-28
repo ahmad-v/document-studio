@@ -1,7 +1,9 @@
 use crate::{
     load,
     pdf_workspace::{
-        page_window, parse_page_selection, BoundedPageCache, THUMBNAIL_CACHE_CAPACITY,
+        is_new_pdf_output, is_pdf_input, merge_request_parameter, move_page, page_window,
+        parse_page_range, parse_page_selection, serialize_page_order, BoundedPageCache,
+        THUMBNAIL_CACHE_CAPACITY,
     },
     render_viewer_batch, ViewerBatch,
 };
@@ -23,6 +25,18 @@ enum Message {
     RotateCurrentPage(u16),
     RotatePathChosen(Option<(PathBuf, PathBuf, usize, u16)>),
     Rotated(std::result::Result<(PathBuf, String), String>),
+    MovePage(isize),
+    SaveReorderedCopy,
+    ReorderPathChosen(Option<(PathBuf, PathBuf, String)>),
+    Reordered(std::result::Result<(PathBuf, String), String>),
+    SplitRangeInput(String),
+    SavePageRange,
+    SplitPathChosen(Option<(PathBuf, PathBuf, String)>),
+    SplitDone(std::result::Result<(PathBuf, String), String>),
+    MergePdf,
+    MergeInputChosen(PathBuf, Option<PathBuf>),
+    MergeOutputChosen(Option<(PathBuf, PathBuf, String, PathBuf)>),
+    MergeDone(std::result::Result<(PathBuf, String), String>),
     CancelProcessing,
     Previous,
     Next,
@@ -41,8 +55,11 @@ struct Viewer {
     path: PathBuf,
     page: usize,
     pages: usize,
+    page_order: Vec<usize>,
+    split_range: String,
     preview: Option<image::Handle>,
     preview_size: Option<(u32, u32)>,
+    properties_summary: String,
     thumbnails: BoundedPageCache<image::Handle>,
     page_input: String,
     zoom: Option<f32>,
@@ -60,12 +77,18 @@ fn remember_recent(recent: &mut Vec<PathBuf>, path: PathBuf) {
     recent.truncate(8);
 }
 
-fn render_task(path: PathBuf, page: usize, thumbnail_pages: Vec<usize>, job: Job) -> Task<Message> {
+fn render_task(
+    path: PathBuf,
+    display_position: usize,
+    source_page: usize,
+    thumbnail_pages: Vec<usize>,
+    job: Job,
+) -> Task<Message> {
     Task::perform(
         async move {
             std::thread::spawn(move || {
                 std::panic::catch_unwind(AssertUnwindSafe(|| {
-                    render_viewer_batch(&path, page, &thumbnail_pages, &job)
+                    render_viewer_batch(&path, source_page, &thumbnail_pages, &job)
                         .map(Arc::new)
                         .map_err(|error| error.message)
                 }))
@@ -74,7 +97,7 @@ fn render_task(path: PathBuf, page: usize, thumbnail_pages: Vec<usize>, job: Job
             .join()
             .unwrap_or_else(|_| Err("The PDF preview worker stopped unexpectedly".into()))
         },
-        move |result| Message::Rendered(page, result),
+        move |result| Message::Rendered(display_position, result),
     )
 }
 
@@ -138,15 +161,99 @@ fn rotate_task(
     )
 }
 
+fn reorder_task(source: PathBuf, output: PathBuf, order: String, job: Job) -> Task<Message> {
+    Task::perform(
+        async move {
+            std::thread::spawn(move || {
+                std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    crate::handle(
+                        Request {
+                            operation: "pdf-reorder".into(),
+                            input: source,
+                            output: output.clone(),
+                            parameter: order,
+                            ..Request::default()
+                        },
+                        job,
+                    )
+                    .map(|outcome| (output, outcome.preview))
+                    .map_err(|error| error.message)
+                }))
+                .unwrap_or_else(|_| Err("PDF reordering stopped unexpectedly".into()))
+            })
+            .join()
+            .unwrap_or_else(|_| Err("PDF reorder worker stopped unexpectedly".into()))
+        },
+        Message::Reordered,
+    )
+}
+
+fn page_range_task(source: PathBuf, output: PathBuf, range: String, job: Job) -> Task<Message> {
+    Task::perform(
+        async move {
+            std::thread::spawn(move || {
+                std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    crate::handle(
+                        Request {
+                            operation: "pdf-split".into(),
+                            input: source,
+                            output: output.clone(),
+                            parameter: range,
+                            ..Request::default()
+                        },
+                        job,
+                    )
+                    .map(|outcome| (output, outcome.preview))
+                    .map_err(|error| error.message)
+                }))
+                .unwrap_or_else(|_| Err("PDF page-range extraction stopped unexpectedly".into()))
+            })
+            .join()
+            .unwrap_or_else(|_| Err("PDF page-range worker stopped unexpectedly".into()))
+        },
+        Message::SplitDone,
+    )
+}
+
+fn merge_task(source: PathBuf, output: PathBuf, second_input: String, job: Job) -> Task<Message> {
+    Task::perform(
+        async move {
+            std::thread::spawn(move || {
+                std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    crate::handle(
+                        Request {
+                            operation: "pdf-merge".into(),
+                            input: source,
+                            output: output.clone(),
+                            parameter: second_input,
+                            ..Request::default()
+                        },
+                        job,
+                    )
+                    .map(|outcome| (output, outcome.preview))
+                    .map_err(|error| error.message)
+                }))
+                .unwrap_or_else(|_| Err("PDF merge stopped unexpectedly".into()))
+            })
+            .join()
+            .unwrap_or_else(|_| Err("PDF merge worker stopped unexpectedly".into()))
+        },
+        Message::MergeDone,
+    )
+}
+
 impl Viewer {
     fn open_path(&mut self, path: PathBuf) -> Task<Message> {
         self.path = path.clone();
         remember_recent(&mut self.recent, path);
         self.page = 1;
         self.pages = 1;
+        self.page_order.clear();
+        self.split_range = "1-1".into();
         self.page_input = "1".into();
         self.preview = None;
         self.preview_size = None;
+        self.properties_summary.clear();
         self.thumbnails = BoundedPageCache::default();
         self.zoom = None;
         self.request_page(1)
@@ -160,7 +267,16 @@ impl Viewer {
         self.page_input = page.to_string();
         self.preview = None;
         self.preview_size = None;
-        let visible = page_window(page, self.pages);
+        let actual_page = self.page_order.get(page - 1).copied().unwrap_or(page);
+        let visible = page_window(page, self.pages)
+            .into_iter()
+            .map(|position| {
+                self.page_order
+                    .get(position - 1)
+                    .copied()
+                    .unwrap_or(position)
+            })
+            .collect::<Vec<_>>();
         for visible_page in &visible {
             self.thumbnails.touch(*visible_page);
         }
@@ -171,7 +287,13 @@ impl Viewer {
         self.loading = true;
         self.job = Job::new();
         self.status = format!("Rendering page {page}…");
-        render_task(self.path.clone(), page, missing, self.job.clone())
+        render_task(
+            self.path.clone(),
+            page,
+            actual_page,
+            missing,
+            self.job.clone(),
+        )
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -196,7 +318,11 @@ impl Viewer {
                 return self.open_path(path);
             }
             Message::ExtractCurrentPage if !self.loading && !self.processing => {
-                let page = self.page;
+                let page = self
+                    .page_order
+                    .get(self.page - 1)
+                    .copied()
+                    .unwrap_or(self.page);
                 let source = self.path.clone();
                 let file_name = self
                     .path
@@ -253,6 +379,7 @@ impl Viewer {
             Message::RotateCurrentPage(degrees) if !self.loading && !self.processing => {
                 let source = self.path.clone();
                 let page = self.page;
+                let source_page = self.page_order.get(page - 1).copied().unwrap_or(page);
                 let stem = self
                     .path
                     .file_stem()
@@ -261,14 +388,14 @@ impl Viewer {
                     .to_owned();
                 return Task::perform(
                     async move {
-                        let default_name = format!("{stem}-page-{page}-rotated.pdf");
+                        let default_name = format!("{stem}-page-{source_page}-rotated.pdf");
                         rfd::AsyncFileDialog::new()
                             .set_title("Save rotated PDF copy")
                             .add_filter("PDF document", &["pdf"])
                             .set_file_name(&default_name)
                             .save_file()
                             .await
-                            .map(|file| (source, file.path().to_path_buf(), page, degrees))
+                            .map(|file| (source, file.path().to_path_buf(), source_page, degrees))
                     },
                     Message::RotatePathChosen,
                 );
@@ -304,13 +431,222 @@ impl Viewer {
                     Err(error) => self.status = format!("Could not rotate the page: {error}"),
                 }
             }
+            Message::MovePage(delta) if !self.loading && !self.processing => {
+                if let Some(position) = move_page(&mut self.page_order, self.page, delta) {
+                    self.page = position;
+                    self.page_input = position.to_string();
+                    self.status = format!(
+                        "Selected page moved to position {position}; save a reordered copy to apply the new order."
+                    );
+                }
+            }
+            Message::SaveReorderedCopy if !self.loading && !self.processing => {
+                let Some(order) = serialize_page_order(&self.page_order) else {
+                    self.status = "The page order is invalid or exceeds the document limit.".into();
+                    return Task::none();
+                };
+                let source = self.path.clone();
+                let stem = self
+                    .path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("document")
+                    .to_owned();
+                return Task::perform(
+                    async move {
+                        let default_name = format!("{stem}-reordered.pdf");
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Save reordered PDF copy")
+                            .add_filter("PDF document", &["pdf"])
+                            .set_file_name(&default_name)
+                            .save_file()
+                            .await
+                            .map(|file| (source, file.path().to_path_buf(), order))
+                    },
+                    Message::ReorderPathChosen,
+                );
+            }
+            Message::ReorderPathChosen(Some((source, output, order)))
+                if !self.loading && !self.processing =>
+            {
+                if !output
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+                {
+                    self.status = "Choose a .pdf output path.".into();
+                    return Task::none();
+                }
+                if output == source {
+                    self.status = "Choose a new output path to preserve the original PDF.".into();
+                    return Task::none();
+                }
+                self.processing = true;
+                self.processing_job = Job::new();
+                self.status = "Saving reordered PDF copy; original document is preserved…".into();
+                return reorder_task(source, output, order, self.processing_job.clone());
+            }
+            Message::Reordered(result) => {
+                self.processing = false;
+                self.processing_job = Job::new();
+                match result {
+                    Ok((output, summary)) => {
+                        self.status = format!("{summary}; original document preserved.");
+                        return self.open_path(output);
+                    }
+                    Err(error) => self.status = format!("Could not reorder the pages: {error}"),
+                }
+            }
+            Message::SplitRangeInput(value) => self.split_range = value,
+            Message::SavePageRange if !self.loading && !self.processing => {
+                let Some((start, end)) = parse_page_range(&self.split_range, self.pages) else {
+                    self.status = format!(
+                        "Enter an inclusive page range from 1 to {} (start-end).",
+                        self.pages
+                    );
+                    return Task::none();
+                };
+                let source = self.path.clone();
+                let stem = self
+                    .path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("document")
+                    .to_owned();
+                let range = format!("{start}-{end}");
+                return Task::perform(
+                    async move {
+                        let default_name = format!("{stem}-pages-{start}-{end}.pdf");
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Save selected page range as a new PDF")
+                            .add_filter("PDF document", &["pdf"])
+                            .set_file_name(&default_name)
+                            .save_file()
+                            .await
+                            .map(|file| (source, file.path().to_path_buf(), range))
+                    },
+                    Message::SplitPathChosen,
+                );
+            }
+            Message::SplitPathChosen(Some((source, output, range)))
+                if !self.loading && !self.processing =>
+            {
+                if source != self.path {
+                    self.status = "The open PDF changed while the save dialog was active. Retry the range operation.".into();
+                    return Task::none();
+                }
+                if !is_new_pdf_output(&source, None, &output) {
+                    self.status =
+                        "Choose a new output path with a lowercase .pdf extension.".into();
+                    return Task::none();
+                }
+                self.processing = true;
+                self.processing_job = Job::new();
+                self.status = format!("Saving pages {range} to a new PDF; source preserved…");
+                return page_range_task(source, output, range, self.processing_job.clone());
+            }
+            Message::SplitDone(result) => {
+                self.processing = false;
+                self.processing_job = Job::new();
+                self.status = match result {
+                    Ok((output, summary)) => {
+                        format!("{summary} at {}; source preserved. Structural output may omit annotations, bookmarks, forms, or metadata.", output.display())
+                    }
+                    Err(error) => format!("Could not save the selected page range: {error}"),
+                };
+            }
+            Message::MergePdf if !self.loading && !self.processing => {
+                let source = self.path.clone();
+                return Task::perform(
+                    async move {
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Choose a second PDF to merge")
+                            .add_filter("PDF document", &["pdf"])
+                            .pick_file()
+                            .await
+                            .map(|file| file.path().to_path_buf())
+                    },
+                    move |second| Message::MergeInputChosen(source.clone(), second),
+                );
+            }
+            Message::MergeInputChosen(source, Some(second))
+                if !self.loading && !self.processing =>
+            {
+                if source != self.path {
+                    self.status =
+                        "The open PDF changed while the file dialog was active. Retry the merge."
+                            .into();
+                    return Task::none();
+                }
+                if !is_pdf_input(&second) {
+                    self.status = "Choose a PDF as the second merge input.".into();
+                    return Task::none();
+                }
+                if source == second {
+                    self.status = "Choose a different second PDF.".into();
+                    return Task::none();
+                }
+                let Some(parameter) = merge_request_parameter(&second) else {
+                    self.status = "The second PDF path is not valid UTF-8 and cannot be passed safely to the current request interface.".into();
+                    return Task::none();
+                };
+                let stem = source
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("document")
+                    .to_owned();
+                return Task::perform(
+                    async move {
+                        let default_name = format!("{stem}-merged.pdf");
+                        rfd::AsyncFileDialog::new()
+                            .set_title("Save merged PDF copy")
+                            .add_filter("PDF document", &["pdf"])
+                            .set_file_name(&default_name)
+                            .save_file()
+                            .await
+                            .map(|file| (source, second, parameter, file.path().to_path_buf()))
+                    },
+                    Message::MergeOutputChosen,
+                );
+            }
+            Message::MergeOutputChosen(Some((source, second, parameter, output)))
+                if !self.loading && !self.processing =>
+            {
+                if source != self.path {
+                    self.status =
+                        "The open PDF changed while the save dialog was active. Retry the merge."
+                            .into();
+                    return Task::none();
+                }
+                if !is_new_pdf_output(&source, Some(&second), &output) {
+                    self.status = "Choose a new output path with a lowercase .pdf extension that does not match either input.".into();
+                    return Task::none();
+                }
+                self.processing = true;
+                self.processing_job = Job::new();
+                self.status = "Experimental page-only merge running; annotations, forms, bookmarks, or document metadata may be lost…".into();
+                return merge_task(source, output, parameter, self.processing_job.clone());
+            }
+            Message::MergeDone(result) => {
+                self.processing = false;
+                self.processing_job = Job::new();
+                self.status = match result {
+                    Ok((output, summary)) => format!(
+                        "{summary} at {}; source PDFs preserved. Page-only experimental output may omit annotations, forms, bookmarks, and document metadata.",
+                        output.display()
+                    ),
+                    Err(error) => format!("Could not merge the PDFs: {error}"),
+                };
+            }
             Message::Previous if !self.loading && self.page > 1 => {
                 return self.request_page(self.page - 1);
             }
             Message::Next if !self.loading && self.page < self.pages => {
                 return self.request_page(self.page + 1);
             }
-            Message::SelectPage(page) if !self.loading => return self.request_page(page),
+            Message::SelectPage(page) if !self.loading && page != self.page => {
+                return self.request_page(page);
+            }
             Message::PageInput(value) => self.page_input = value,
             Message::GoToPage if !self.loading => {
                 if let Some(page) = parse_page_selection(&self.page_input, self.pages) {
@@ -334,6 +670,10 @@ impl Viewer {
                 if page == self.page {
                     match result {
                         Ok(batch) => {
+                            if self.page_order.len() != batch.page_count {
+                                self.page_order = (1..=batch.page_count).collect();
+                                self.split_range = format!("1-{}", batch.page_count);
+                            }
                             self.preview = Some(image::Handle::from_rgba(
                                 batch.preview.width,
                                 batch.preview.height,
@@ -341,6 +681,18 @@ impl Viewer {
                             ));
                             self.preview_size = Some((batch.preview.width, batch.preview.height));
                             self.pages = batch.page_count;
+                            let properties = &batch.properties;
+                            self.properties_summary = format!(
+                                "{}  |  Author: {}  |  PDF {}  |  {} pages  |  {} bytes\nPage {}: {:.1} × {:.1} pt",
+                                properties.title.as_deref().unwrap_or("Untitled"),
+                                properties.author.as_deref().unwrap_or("Unknown"),
+                                properties.version,
+                                batch.page_count,
+                                properties.byte_length,
+                                batch.preview.page,
+                                batch.page_width_points,
+                                batch.page_height_points,
+                            );
                             for thumbnail in &batch.thumbnails {
                                 self.thumbnails.insert(
                                     thumbnail.page,
@@ -410,6 +762,26 @@ impl Viewer {
         let rotate_counterclockwise = button("Rotate page 90° CCW").on_press_maybe(
             (!self.loading && !self.processing).then_some(Message::RotateCurrentPage(270)),
         );
+        let source_page = self
+            .page_order
+            .get(self.page.saturating_sub(1))
+            .copied()
+            .unwrap_or(self.page);
+        let move_earlier = button("Move page earlier").on_press_maybe(
+            (!self.loading && !self.processing && self.page > 1).then_some(Message::MovePage(-1)),
+        );
+        let move_later = button("Move page later").on_press_maybe(
+            (!self.loading && !self.processing && self.page < self.pages)
+                .then_some(Message::MovePage(1)),
+        );
+        let save_reordered = button("Save reordered copy…").on_press_maybe(
+            (!self.loading && !self.processing && serialize_page_order(&self.page_order).is_some())
+                .then_some(Message::SaveReorderedCopy),
+        );
+        let save_page_range = button("Save range as PDF…")
+            .on_press_maybe((!self.loading && !self.processing).then_some(Message::SavePageRange));
+        let merge_pdf = button("Merge PDF pages only… (experimental)")
+            .on_press_maybe((!self.loading && !self.processing).then_some(Message::MergePdf));
         let go = button("Go");
         let go = if !self.loading {
             go.on_press(Message::GoToPage)
@@ -417,30 +789,44 @@ impl Viewer {
             go
         };
         let mut thumbnails = row![].spacing(8).align_y(iced::Alignment::Center);
-        for page in page_window(self.page, self.pages) {
+        for position in page_window(self.page, self.pages) {
+            let page = self
+                .page_order
+                .get(position - 1)
+                .copied()
+                .unwrap_or(position);
+            let selected = position == self.page;
+            let label = if selected {
+                format!("Page {page}, current position {position}")
+            } else {
+                format!("Page {page}")
+            };
             let item: Element<'_, Message> = if let Some(handle) = self.thumbnails.peek(page) {
                 let thumb = image(handle.clone())
                     .content_fit(ContentFit::Contain)
                     .width(Length::Fixed(96.0))
                     .height(Length::Fixed(112.0));
-                let selected = button(
-                    column![thumb, text(format!("Page {page}"))].align_x(iced::Alignment::Center),
-                );
-                if !self.loading && page != self.page {
-                    selected.on_press(Message::SelectPage(page)).into()
-                } else {
-                    selected.into()
-                }
+                button(column![thumb, text(label)].align_x(iced::Alignment::Center))
+                    .style(if selected {
+                        button::primary
+                    } else {
+                        button::secondary
+                    })
+                    .on_press_maybe((!self.loading).then_some(Message::SelectPage(position)))
+                    .into()
             } else {
                 button(
-                    column![text("Preview"), text(format!("Page {page}"))]
+                    column![text("Preview"), text(label)]
                         .width(Length::Fixed(96.0))
                         .height(Length::Fixed(112.0))
                         .align_x(iced::Alignment::Center),
                 )
-                .on_press_maybe(
-                    (!self.loading && page != self.page).then_some(Message::SelectPage(page)),
-                )
+                .style(if selected {
+                    button::primary
+                } else {
+                    button::secondary
+                })
+                .on_press_maybe((!self.loading).then_some(Message::SelectPage(position)))
                 .into()
             };
             thumbnails = thumbnails.push(item);
@@ -478,6 +864,24 @@ impl Viewer {
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center);
+        let reorder_controls = row![
+            text(format!("Source page {source_page}")),
+            move_earlier,
+            move_later,
+            save_reordered,
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+        let structure_controls = row![
+            text("Page range"),
+            text_input("start-end", &self.split_range)
+                .on_input(Message::SplitRangeInput)
+                .width(Length::Fixed(112.0)),
+            save_page_range,
+            merge_pdf,
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
         let content: Element<'_, Message> = match &self.preview {
             Some(handle) => {
                 let preview = image(handle.clone()).content_fit(ContentFit::Contain);
@@ -508,12 +912,15 @@ impl Viewer {
         column![
             navigation,
             controls,
+            reorder_controls,
+            structure_controls,
             scrollable(row(recent).spacing(6))
                 .direction(scrollable::Direction::Horizontal(
                     scrollable::Scrollbar::default(),
                 ))
                 .height(Length::Fixed(36.0)),
             text(&self.status),
+            text(&self.properties_summary).size(12),
             thumbnail_strip,
             scrollable(
                 container(content)
@@ -547,8 +954,11 @@ pub(super) fn run(path: PathBuf, initial_page: usize) -> std::result::Result<(),
         path: path.clone(),
         page: initial_page,
         pages,
+        page_order: (1..=pages).collect(),
+        split_range: format!("1-{pages}"),
         preview: None,
         preview_size: None,
+        properties_summary: String::new(),
         thumbnails: BoundedPageCache::default(),
         page_input: initial_page.to_string(),
         zoom: None,
@@ -564,7 +974,13 @@ pub(super) fn run(path: PathBuf, initial_page: usize) -> std::result::Result<(),
         viewer.thumbnails.touch(*visible_page);
     }
     let missing = visible;
-    let initial_task = render_task(path, initial_page, missing, viewer.job.clone());
+    let initial_task = render_task(
+        path,
+        initial_page,
+        initial_page,
+        missing,
+        viewer.job.clone(),
+    );
     iced::application(
         "Document Studio — PDF Preview",
         Viewer::update,
