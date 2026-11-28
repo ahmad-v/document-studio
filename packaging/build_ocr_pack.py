@@ -15,7 +15,7 @@ import subprocess
 import tarfile
 import tempfile
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 TESSERACT_COMMIT = "64eab6c457b2337dd690746a5fde5c222b40d5f8"
@@ -97,7 +97,9 @@ def main() -> None:
             members = bundle.getmembers()
             expected_root = f"tesseract-{TESSERACT_COMMIT}"
             if not members or any(
-                not member.name.startswith(expected_root + "/")
+                not PurePosixPath(member.name).parts
+                or PurePosixPath(member.name).parts[0] != expected_root
+                or ".." in PurePosixPath(member.name).parts
                 or member.issym() or member.islnk() or member.isdev()
                 for member in members
             ):
