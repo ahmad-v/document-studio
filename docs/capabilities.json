@@ -186,6 +186,13 @@
         "x86_64-unknown-linux-gnu"
       ],
       "fixture_status": "Added synthetic fixture for repeatable equality and visual/page-dimension changes plus a 100-page rejection bound; hosted Check/Integration/platform verification pending. Renderer fidelity and parser sandbox limitations are disclosed."
+    },
+    {
+      "operation": "pdf-page-compare",
+      "description": "Render selected pages from two bounded local PDFs with Hayro and save a side-by-side PNG with exact changed-pixel and mean RGB metrics when render dimensions match; no text, metadata or structure comparison",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "Added operation-route tests for identical and modified pages, output PNG readability, pixel metrics and no-overwrite; hosted Check/Integration pending. Renderer fidelity, parser isolation and hard CPU/memory limits remain open."
     }
   ]
 }
