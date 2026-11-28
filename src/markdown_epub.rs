@@ -75,10 +75,10 @@ pub(crate) fn convert(path: &Path, metadata_json: &str, job: &Job) -> Result<Vec
     let title_xml = xml_escape(&title);
     let language_xml = xml_escape(&language);
     let content = format!(
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"{language_xml}\" lang=\"{language_xml}\"><head><title>{title_xml}</title><link rel=\"stylesheet\" type=\"text/css\" href=\"style.css\"/></head><body>{body}</body></html>"
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xml:lang=\"{language_xml}\" lang=\"{language_xml}\"><head><title>{title_xml}</title><link rel=\"stylesheet\" type=\"text/css\" href=\"style.css\"/></head><body>{body}</body></html>"
     );
     let nav = format!(
-        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"{language_xml}\" lang=\"{language_xml}\"><head><title>Contents</title></head><body><nav epub:type=\"toc\" id=\"toc\"><h1>Contents</h1><ol><li><a href=\"chapter-001.xhtml\">{title_xml}</a></li></ol></nav></body></html>"
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"{language_xml}\" lang=\"{language_xml}\"><head><title>Contents</title></head><body><nav epub:type=\"toc\" id=\"toc\"><h1>Contents</h1><ol><li><a href=\"chapter-001.xhtml\">{title_xml}</a></li></ol></nav></body></html>"
     );
     let mut identity = Vec::with_capacity(source.len() + title.len() + language.len());
     identity.extend_from_slice(source.as_bytes());

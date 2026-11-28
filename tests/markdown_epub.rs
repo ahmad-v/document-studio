@@ -51,6 +51,7 @@ fn markdown_to_epub_builds_a_bounded_self_contained_epub3_package() {
     assert!(chapter.contains("café"));
     assert!(chapter.contains("remote link"));
     assert!(chapter.contains("remote cover"));
+    assert!(!chapter.contains("<!DOCTYPE"));
     assert!(!chapter.contains("https://"));
     assert!(chapter.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
     let text = document_studio::handle(
