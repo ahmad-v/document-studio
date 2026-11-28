@@ -2,6 +2,19 @@
 fn main() {
     let mut args = std::env::args().skip(1).collect::<Vec<_>>();
     #[cfg(feature = "gui")]
+    if args.first().map(String::as_str) == Some("--read-epub") {
+        args.remove(0);
+        let Some(input) = args.first() else {
+            eprintln!("Usage: document-studio --read-epub <input.epub>");
+            std::process::exit(2);
+        };
+        if let Err(error) = document_studio::run_epub_reader(std::path::Path::new(input)) {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    #[cfg(feature = "gui")]
     if args.first().map(String::as_str) == Some("--preview-pdf") {
         args.remove(0);
         let Some(input) = args.first() else {

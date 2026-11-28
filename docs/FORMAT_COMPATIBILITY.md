@@ -11,6 +11,7 @@ Nothing is verified on a native target. The machine-readable registry is a devel
 | docx-text | UTF-8 WordprocessingML main-body plain text | Linux fixture and independent reader-tested |
 | epub-inspect | Bounded EPUB container, metadata, manifest and reading-order spine inspection | Fixtures added; hosted verification pending; not a complete EPUB conformance validator |
 | epub-text | UTF-8 XHTML body text in EPUB spine order | Fixtures added; hosted verification pending; no layout/CSS/image rendering |
+| epub-reader | Native offline chapter reader with UTF-8-safe bounded text pages and adjustable text size | Source unit/route tests added; hosted GUI and native target verification pending; plain-text content only |
 | compare-text | UTF-8 line changes with optional plain-text report | implemented-unverified |
 | citation-validate | Bounded CSL JSON object/array validation | Linux unit and operation-route fixtures tested |
 | citation-convert | Supported-field CSL JSON/RIS interchange and CSL JSON/RIS to BibTeX export | Linux unit and route fixtures tested; exported records require human review |

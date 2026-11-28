@@ -3,6 +3,8 @@ mod citations;
 mod compare;
 mod docx_text;
 mod epub;
+#[cfg(feature = "gui")]
+mod epub_reader;
 #[cfg(feature = "ocr")]
 mod ocr;
 #[cfg(feature = "gui")]
@@ -22,6 +24,8 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"docx-text",label:"DOCX body text",hint:"Extract plain text from a DOCX document body. Optional new .txt output."},
  Operation{id:"epub-inspect",label:"Inspect EPUB package",hint:"Inspect bounded EPUB container, metadata and spine structure. Optional new .json report. This is not a complete EPUB conformance validator or layout renderer."},
  Operation{id:"epub-text",label:"Extract EPUB text",hint:"Extract UTF-8 XHTML body text in reading order. Optional new .txt output. Styles, images, scripts, navigation and page layout are not rendered."},
+ #[cfg(feature="gui")]
+ Operation{id:"epub-reader",label:"Read EPUB book",hint:"Open a native, offline plain-text reader with spine chapter navigation, bounded text pages, adjustable type size and recent books. Layout and embedded media are not rendered."},
  Operation{id:"compare-text",label:"Compare text files",hint:"Enter the second UTF-8 text file path as the parameter. Optional new .txt report."},
  Operation{id:"citation-convert",label:"Convert citation records",hint:"Parameter format pair: csl-json->ris, ris->csl-json, csl-json->bibtex, or ris->bibtex. Choose a new output with .json, .ris, or .bib extension."},
  Operation{id:"citation-validate",label:"Validate CSL JSON bibliography",hint:"Validate one CSL JSON object or array (up to 10,000 records). Optional new .json report."},
@@ -337,6 +341,11 @@ fn render_pdf_preview(path: &Path, page_number: usize, output: &Path, job: &Job)
 pub fn run_pdf_preview(path: &Path, initial_page: usize) -> std::result::Result<(), String> {
     pdf_viewer::run(path.to_path_buf(), initial_page)
 }
+
+#[cfg(feature = "gui")]
+pub fn run_epub_reader(path: &Path) -> std::result::Result<(), String> {
+    epub_reader::run(path.to_path_buf())
+}
 fn extension(p: &Path, ext: &str) -> Result<()> {
     if p.extension().and_then(|s| s.to_str()) != Some(ext) {
         return Err(Error::input(format!("Expected .{ext} output")));
@@ -597,6 +606,24 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
                 );
             }
             preview
+        }
+        "epub-reader" => {
+            #[cfg(feature = "gui")]
+            {
+                if !cfg!(test) && !std::env::args_os().any(|argument| argument == "--cli") {
+                    let executable = std::env::current_exe().map_err(err)?;
+                    std::process::Command::new(executable)
+                        .arg("--read-epub")
+                        .arg(&r.input)
+                        .spawn()
+                        .map_err(err)?;
+                }
+                "Opened the native EPUB reader in a separate window".into()
+            }
+            #[cfg(not(feature = "gui"))]
+            {
+                Err(Error::input("The native EPUB reader requires a GUI build"))?
+            }
         }
         "compare-text" => {
             let report = compare::compare(&r.input, Path::new(&r.parameter), &j)?;

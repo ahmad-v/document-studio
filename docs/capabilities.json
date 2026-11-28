@@ -80,6 +80,13 @@
       "fixture_status": "Added reading-order, XML entity and script-exclusion fixtures; hosted verification pending"
     },
     {
+      "operation": "epub-reader",
+      "description": "Native offline EPUB plain-text reader with chapter navigation, bounded UTF-8-safe text pages, adjustable text size and session recents; no layout rendering",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "Reader source tests cover chunk boundaries, chapter navigation windows, recent-book limits and metadata truncation; hosted GUI and five-target verification pending"
+    },
+    {
       "operation": "compare-text",
       "description": "UTF-8 line changes with optional text report",
       "status": "implemented-unverified",
