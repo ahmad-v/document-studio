@@ -20,6 +20,18 @@ use std::{
 
 const MAX_TEXT: u64 = 4 * 1024 * 1024;
 const MAX_PIXELS: u64 = 16_000_000;
+const MAX_PDF_PAGES: usize = 20;
+const MAX_SEARCHABLE_PDF_BYTES: usize = 128 * 1024 * 1024;
+
+fn validate_pdf_page_count(pages: usize) -> Result<()> {
+    if pages == 0 || pages > MAX_PDF_PAGES {
+        return Err(Error::new(
+            ErrorKind::Limit,
+            format!("OCR accepts between 1 and {MAX_PDF_PAGES} PDF pages per job"),
+        ));
+    }
+    Ok(())
+}
 
 fn component(root: &Path, name: &str, pinned: Option<&str>, limit: u64) -> Result<PathBuf> {
     let expected = pinned.ok_or_else(|| Error::engine("OCR build has no pinned engine pack"))?;
@@ -155,6 +167,85 @@ pub fn searchable_pdf(input: &Path, job: &Job) -> Result<Vec<u8>> {
     }
     job.check()?;
     Ok(bytes)
+}
+
+/// Render a bounded number of PDF pages and create a searchable, raster-page PDF.
+/// The original PDF is never modified; page annotations, forms and bookmarks are not retained.
+pub fn searchable_pdf_document(input: &Path, job: &Job) -> Result<Vec<u8>> {
+    let source = read_bounded(input, crate::pdf_workspace::MAX_DOCUMENT_BYTES)?;
+    let inspected = crate::load_pdf_bytes(&source)?;
+    let page_count = inspected.get_pages().len();
+    validate_pdf_page_count(page_count)?;
+
+    let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        hayro::hayro_syntax::Pdf::new(source)
+    }))
+    .map_err(|_| Error::input("PDF renderer stopped unexpectedly while parsing the document"))?
+    .map_err(|_| Error::input("PDF renderer could not parse the document"))?;
+    let pages = rendered.pages();
+    if pages.len() != page_count {
+        return Err(Error::input(
+            "PDF parser and renderer disagree about the page count",
+        ));
+    }
+
+    let scratch = tempfile::tempdir()?;
+    let mut combined = None;
+    let mut generated_bytes = 0usize;
+    for (index, page) in pages.iter().enumerate() {
+        job.check()?;
+        let page_number = index + 1;
+        let pixels = crate::render_page_bitmap(
+            page,
+            page_number,
+            crate::pdf_workspace::PREVIEW_MAX_EDGE as u16,
+            job,
+        )?;
+        let rgba = image::RgbaImage::from_raw(pixels.width, pixels.height, pixels.pixels)
+            .ok_or_else(|| Error::engine("PDF renderer returned an invalid pixel buffer"))?;
+        let image_path = scratch.path().join(format!("page-{page_number}.png"));
+        let mut file = fs::File::create(&image_path)?;
+        image::DynamicImage::ImageRgba8(rgba)
+            .write_to(&mut file, image::ImageFormat::Png)
+            .map_err(|error| Error::engine(error.to_string()))?;
+        job.check()?;
+
+        let pdf_bytes = run(&image_path, true, job)?;
+        generated_bytes = generated_bytes
+            .checked_add(pdf_bytes.len())
+            .filter(|total| *total <= MAX_SEARCHABLE_PDF_BYTES)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Limit,
+                    "Searchable PDF exceeds the 128 MiB output limit",
+                )
+            })?;
+        let document = crate::load_pdf_bytes(&pdf_bytes)?;
+        if document.get_pages().len() != 1 {
+            return Err(Error::engine(
+                "OCR engine did not produce exactly one output page",
+            ));
+        }
+        combined = Some(match combined {
+            Some(previous) => crate::merge(previous, document, job)?,
+            None => document,
+        });
+        job.progress(page_number as u64, page_count as u64);
+    }
+
+    let mut output = Vec::new();
+    combined
+        .ok_or_else(|| Error::engine("OCR produced no document pages"))?
+        .save_to(&mut output)
+        .map_err(|error| Error::engine(error.to_string()))?;
+    if output.len() > MAX_SEARCHABLE_PDF_BYTES {
+        return Err(Error::new(
+            ErrorKind::Limit,
+            "Searchable PDF exceeds the 128 MiB output limit",
+        ));
+    }
+    job.check()?;
+    Ok(output)
 }
 
 fn run(input: &Path, pdf: bool, job: &Job) -> Result<Vec<u8>> {
@@ -430,6 +521,20 @@ mod tests {
 
         std::fs::write(&executable, b"modified engine fixture").unwrap();
         assert!(EngineRuntime::resolve_trusted_path(spec, &executable).is_err());
+    }
+
+    #[test]
+    fn multipage_pdf_ocr_enforces_a_bounded_page_count() {
+        assert!(validate_pdf_page_count(1).is_ok());
+        assert!(validate_pdf_page_count(MAX_PDF_PAGES).is_ok());
+        assert_eq!(
+            validate_pdf_page_count(0).unwrap_err().kind,
+            ErrorKind::Limit
+        );
+        assert_eq!(
+            validate_pdf_page_count(MAX_PDF_PAGES + 1).unwrap_err().kind,
+            ErrorKind::Limit
+        );
     }
 
     #[cfg(unix)]

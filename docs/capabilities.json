@@ -48,6 +48,13 @@
       "fixture_status": "Linux CLI and independent text, page count and image smoke passed"
     },
     {
+      "operation": "ocr-pdf",
+      "description": "Rasterize and create an English searchable copy of up to 20 PDF pages using the hash-verified private OCR engine; original structure is not retained",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "Bounded source and output code paths added; offline pack, rendered OCR, native architecture and clean-install verification pending"
+    },
+    {
       "operation": "ocr-png",
       "description": "Experimental English PNG OCR with a hash-verified application-private Tesseract pack; uses Localwright EngineRuntime where loader and platform launch requirements permit",
       "status": "implemented-unverified",

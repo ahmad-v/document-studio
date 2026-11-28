@@ -5,6 +5,7 @@ Development source only. Launch the GUI after compiling. Choose an operation, en
 - `text-docx`: Writes literal paragraphs from UTF-8 text. Leading Markdown characters are preserved.
 - `markdown-docx`: Basic ATX headings and literal paragraphs to DOCX.
 - `ocr-png-pdf`: Create a new one-page PDF with the source PNG and recognized English text. The optional OCR build and matching installed pack are required.
+- `ocr-pdf`: Create a searchable copy of a local PDF with 1–20 pages using the optional private English OCR build and matching installed pack. Every page is rasterized before OCR; vector content, annotations, forms, bookmarks and document metadata are not retained. The source is unchanged, output is created without overwriting, and this route is not sanitation or redaction. Review OCR against the original.
 - `ocr-png`: English PNG OCR in an [optional engine build](OCR_ENGINE.md).
 - `docx-text`: Preview UTF-8 main-body text or write it to a new `.txt` file. Paragraphs, tabs and line breaks are retained. Layout, list markers, headers, footnotes and images are omitted. Hidden body text may appear. Macros, linked resources and external XML entities are never loaded by this route.
 - `epub-inspect`: Inspect the container, package metadata and reading-order spine of a bounded EPUB. An optional new `.json` report is supported. This checks only the structure needed by this route and is not a complete EPUB conformance validator.
