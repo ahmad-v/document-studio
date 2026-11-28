@@ -1,0 +1,76 @@
+name: Private OCR portable preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: document-ocr-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-x64-offline-ocr:
+    name: Linux x64 private OCR preview
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CARGO_TERM_COLOR: always
+      OCR_PACK: ${{ runner.temp }}/document-ocr-pack/engines/tesseract
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install pinned-engine build and native GUI prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake pkg-config python3 strace \
+            libxkbcommon-dev libwayland-dev xvfb \
+            libleptonica-dev libpng-dev libjpeg-dev libtiff-dev libgif-dev \
+            libwebp-dev libopenjp2-7-dev zlib1g-dev libzstd-dev liblzma-dev
+
+      - name: Build and verify pinned Tesseract and English model pack
+        run: |
+          python3 packaging/build_ocr_pack.py --output "$OCR_PACK"
+          cat "${OCR_PACK%/tesseract}/ocr-build-pins.env"
+
+      - name: Cache OCR-enabled application dependencies
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            target
+          key: document-${{ runner.os }}-${{ runner.arch }}-ocr-preview-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml') }}
+          restore-keys: |
+            document-${{ runner.os }}-${{ runner.arch }}-ocr-preview-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml') }}-
+
+      - name: Build OCR-enabled application with generated asset pins
+        shell: bash
+        run: |
+          source "${OCR_PACK%/tesseract}/ocr-build-pins.env"
+          export DOCUMENT_OCR_TESSERACT_SHA256 DOCUMENT_OCR_ENGLISH_SHA256 DOCUMENT_OCR_LIBRARIES_SHA256
+          CARGO_PROFILE_RELEASE_STRIP=symbols \
+            cargo build --locked --release --features ocr --target x86_64-unknown-linux-gnu
+
+      - name: Package, extract and smoke-test offline OCR
+        env:
+          DOCUMENT_OCR_REQUIRE_NETWORK_TRACE: "1"
+        run: |
+          python3 packaging/portable.py \
+            --target x86_64-unknown-linux-gnu \
+            --binary target/x86_64-unknown-linux-gnu/release/document-studio \
+            --ocr-pack "$OCR_PACK" \
+            --output dist/preview-ocr
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: document-studio-private-ocr-preview-linux-x64
+          path: dist/preview-ocr/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
