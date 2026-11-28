@@ -46,6 +46,13 @@ struct Package {
     archive: ZipArchive<Cursor<Vec<u8>>>,
 }
 
+struct OpfMetadata {
+    title: Option<String>,
+    creators: Vec<String>,
+    language: Option<String>,
+    spine: Vec<Item>,
+}
+
 pub fn inspect(path: &Path, job: &Job) -> Result<serde_json::Value> {
     let Package {
         title,
@@ -180,7 +187,12 @@ fn load(path: &Path, job: &Job) -> Result<Package> {
         ));
     }
     let opf = read_member(&mut archive, &rootfile, MAX_PACKAGE_XML_BYTES, job)?;
-    let (title, creators, language, spine) = parse_opf(&opf, &rootfile, job)?;
+    let OpfMetadata {
+        title,
+        creators,
+        language,
+        spine,
+    } = parse_opf(&opf, &rootfile, job)?;
     if spine.is_empty() || spine.len() > MAX_SPINE_ITEMS {
         return Err(Error::new(
             ErrorKind::Limit,
@@ -413,11 +425,7 @@ fn parse_container(bytes: &[u8], job: &Job) -> Result<String> {
     rootfile.ok_or_else(|| Error::input("EPUB container has no package root"))
 }
 
-fn parse_opf(
-    bytes: &[u8],
-    opf_path: &str,
-    job: &Job,
-) -> Result<(Option<String>, Vec<String>, Option<String>, Vec<Item>)> {
+fn parse_opf(bytes: &[u8], opf_path: &str, job: &Job) -> Result<OpfMetadata> {
     let xml =
         std::str::from_utf8(bytes).map_err(|_| Error::input("EPUB package XML must be UTF-8"))?;
     let mut reader = NsReader::from_str(xml);
@@ -485,10 +493,11 @@ fn parse_opf(
                         }
                         _ => {}
                     }
-                } else if bound(&namespace, DC_NS) && metadata_depth.is_some() {
-                    if matches!(name.as_ref(), "title" | "creator" | "language") {
-                        text_target = Some((depth, String::new()));
-                    }
+                } else if bound(&namespace, DC_NS)
+                    && metadata_depth.is_some()
+                    && matches!(name.as_ref(), "title" | "creator" | "language")
+                {
+                    text_target = Some((depth, String::new()));
                 }
             }
             Event::Text(value) if text_target.is_some() => {
@@ -560,7 +569,12 @@ fn parse_opf(
                 .ok_or_else(|| Error::input("EPUB spine references a missing manifest id"))?,
         );
     }
-    Ok((title, creators, language, spine))
+    Ok(OpfMetadata {
+        title,
+        creators,
+        language,
+        spine,
+    })
 }
 
 fn extract_xhtml(xml: &str, job: &Job) -> Result<String> {
@@ -650,10 +664,9 @@ fn extract_xhtml(xml: &str, job: &Job) -> Result<String> {
                             | "blockquote"
                             | "tr"
                     )
+                    && !output.ends_with('\n')
                 {
-                    if !output.ends_with('\n') {
-                        append_bounded(&mut output, "\n", job)?;
-                    }
+                    append_bounded(&mut output, "\n", job)?;
                 }
                 if body_depth == Some(depth) {
                     body_depth = None;
