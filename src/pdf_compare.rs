@@ -305,16 +305,28 @@ mod tests {
     fn report_detects_visual_and_geometry_changes_and_is_repeatable() {
         let directory = tempfile::tempdir().unwrap();
         let before = directory.path().join("before.pdf");
-        let after = directory.path().join("after.pdf");
+        let visual_change = directory.path().join("visual-change.pdf");
+        let geometry_change = directory.path().join("geometry-change.pdf");
         one_page_pdf(&before, "0 0 0 rg", 200);
-        one_page_pdf(&after, "1 0 0 rg", 240);
+        one_page_pdf(&visual_change, "1 0 0 rg", 200);
+        one_page_pdf(&geometry_change, "0 0 0 rg", 240);
 
-        let report = compare(&before, &after, &Job::new()).unwrap();
-        assert_eq!(report["summary"]["changed_pages"], 1);
-        assert!(report["summary"]["page_count_equal"].as_bool().unwrap());
-        assert_eq!(report["pages"][0]["page_dimensions_equal"], false);
-        assert_eq!(report["pages"][0]["status"], "changed");
-        assert!(report["pages"][0]["changed_pixels"].is_number());
+        let visual_report = compare(&before, &visual_change, &Job::new()).unwrap();
+        assert_eq!(visual_report["summary"]["changed_pages"], 1);
+        assert!(visual_report["summary"]["page_count_equal"]
+            .as_bool()
+            .unwrap());
+        assert_eq!(visual_report["pages"][0]["page_dimensions_equal"], true);
+        assert_eq!(visual_report["pages"][0]["status"], "changed");
+        assert!(visual_report["pages"][0]["changed_pixels"].is_number());
+
+        let geometry_report = compare(&before, &geometry_change, &Job::new()).unwrap();
+        assert_eq!(geometry_report["summary"]["changed_pages"], 1);
+        assert_eq!(geometry_report["pages"][0]["page_dimensions_equal"], false);
+        assert_eq!(
+            geometry_report["pages"][0]["changed_pixels"],
+            serde_json::Value::Null
+        );
 
         let repeat = compare(&before, &before, &Job::new()).unwrap();
         assert_eq!(repeat["summary"]["changed_pages"], 0);
