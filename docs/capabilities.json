@@ -200,6 +200,15 @@
       "status": "implemented-unverified",
       "targets": [],
       "fixture_status": "Added operation-route tests for identical and modified pages, output PNG readability, pixel metrics and no-overwrite; hosted Check/Integration pending. Renderer fidelity, parser isolation and hard CPU/memory limits remain open."
+    },
+    {
+      "operation": "convert-document",
+      "description": "Optional Localwright EngineRuntime route to pinned private Pandoc 3.14 for structural TXT/Markdown/HTML/DOCX/ODT/EPUB/LaTeX conversion; no PDF rendering or layout-fidelity claim",
+      "status": "implemented-unverified",
+      "targets": [
+        "x86_64-unknown-linux-gnu"
+      ],
+      "fixture_status": "Direct pinned Pandoc Linux x64 smoke passed Markdown-to-DOCX, DOCX-to-Markdown with Unicode, and Markdown-to-EPUB; application operation, network trace and package workflow await hosted Integration."
     }
   ]
 }

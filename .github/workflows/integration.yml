@@ -29,7 +29,7 @@ jobs:
       - name: Install Linux GUI build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev xvfb
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev xvfb strace
       - name: Cache Cargo dependencies and target output
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
@@ -76,6 +76,42 @@ jobs:
         run: |
           cargo check --locked --features ocr --all-targets
           cargo test --locked --features ocr
+      - name: Verify private Pandoc structural conversions offline
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/pandoc-3.14-linux-amd64.tar.gz"
+          curl --fail --location --retry 3 --output "$archive" https://github.com/jgm/pandoc/releases/download/3.14/pandoc-3.14-linux-amd64.tar.gz
+          python3 packaging/pandoc_engine.py "$archive" "$RUNNER_TEMP/pandoc-pack"
+          cp -R "$RUNNER_TEMP/pandoc-pack/engines" target/debug/
+          cp -R "$RUNNER_TEMP/pandoc-pack/third-party" target/debug/
+          input="$RUNNER_TEMP/pandoc-input.md"
+          docx="$RUNNER_TEMP/pandoc-roundtrip.docx"
+          markdown="$RUNNER_TEMP/pandoc-roundtrip.md"
+          html="$RUNNER_TEMP/pandoc-report.html"
+          epub="$RUNNER_TEMP/pandoc-report.epub"
+          printf '# Lab results\n\nUnicode: café and μ.\n\n| Treatment | Value |\n| --- | --- |\n| Control | 3 |\n' > "$input"
+          target/debug/document-studio --cli convert-document "$input" "$docx" ''
+          target/debug/document-studio --cli convert-document "$docx" "$markdown" ''
+          grep -q 'Lab results' "$markdown"
+          grep -q 'café' "$markdown"
+          trace="$RUNNER_TEMP/pandoc-offline.trace"
+          strace -f -qq -e trace=network -o "$trace" target/debug/document-studio --cli convert-document "$input" "$html" '{"title":"Offline report","author":"Research Group","language":"en-GB"}'
+          if grep -Eq 'socket\(AF_INET6?,|connect\(.*sa_family=AF_INET6?|sendto\(.*sa_family=AF_INET6?|sendmsg\(.*sa_family=AF_INET6?' "$trace"; then
+            echo "Pandoc conversion attempted IP network access" >&2
+            cat "$trace" >&2
+            exit 1
+          fi
+          grep -q '<title>Offline report</title>' "$html"
+          target/debug/document-studio --cli convert-document "$input" "$epub" ''
+          python3 - "$docx" "$epub" <<'PY'
+          import sys, zipfile
+          for path in sys.argv[1:]:
+              with zipfile.ZipFile(path) as archive:
+                  assert archive.testzip() is None, f"corrupt archive: {path}"
+          with zipfile.ZipFile(sys.argv[2]) as epub_file:
+              assert epub_file.read("mimetype") == b"application/epub+zip"
+          print("Verified private offline Markdown/DOCX/HTML/EPUB routes and package integrity")
+          PY
       - name: Verify pinned Localwright dependency graph
         run: |
           cargo tree --locked -i localwright-core
