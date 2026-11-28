@@ -9,6 +9,7 @@ mod markdown_epub;
 mod markdown_html;
 #[cfg(feature = "ocr")]
 mod ocr;
+mod pandoc;
 mod pdf_compare;
 mod pdf_page_compare;
 #[cfg(feature = "gui")]
@@ -32,6 +33,7 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"epub-markdown",label:"Export EPUB text as Markdown",hint:"Create a new .md file with EPUB title, attribution, spine chapter headings, and escaped plain-text body content. Layout, formatting, navigation, tables, images and other media are not preserved."},
  Operation{id:"markdown-epub",label:"Markdown to EPUB",hint:"Create a new EPUB 3 book from bounded UTF-8 Markdown, preserving headings, lists, tables, emphasis and other supported CommonMark structure. Parameter may be JSON with title and language. Link destinations and image resources are omitted; this is structural conversion, not layout-preserving conversion."},
  Operation{id:"markdown-html",label:"Markdown to offline HTML",hint:"Create a self-contained HTML document from bounded UTF-8 Markdown. Headings, lists, tables, code and inline formatting are structurally converted. Parameter may be JSON with title and language. Link/image destinations are omitted and raw HTML is escaped; no scripts or remote resources are included."},
+ Operation{id:"convert-document",label:"Convert document structure",hint:"Use the optional private Pandoc engine to structurally convert Markdown, HTML, DOCX, ODT, EPUB and LaTeX between supported routes. Choose a new output with the target extension. Optional JSON metadata: title, author and language. No PDF output; layout fidelity is not guaranteed. Requires a verified application-relative Pandoc engine pack."},
  #[cfg(feature="gui")]
  Operation{id:"epub-reader",label:"Read EPUB book",hint:"Open a native, offline plain-text reader with spine chapter navigation, bounded text pages, adjustable type size and recent books. Layout and embedded media are not rendered."},
  Operation{id:"compare-text",label:"Compare text files",hint:"Enter the second UTF-8 text file path as the parameter. Optional new .txt report."},
@@ -557,6 +559,9 @@ fn rebuild_pages(
 }
 pub fn handle(r: Request, j: Job) -> Result<Outcome> {
     j.check()?;
+    if r.operation == "convert-document" {
+        return pandoc::convert(&r.input, &r.output, &r.parameter, &j);
+    }
     let mut written = None;
     let mut warnings = vec![];
     let preview = match r.operation.as_str() {

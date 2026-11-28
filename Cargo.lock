@@ -938,6 +938,7 @@ dependencies = [
  "pulldown-cmark",
  "quick-xml 0.42.0",
  "rfd",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",

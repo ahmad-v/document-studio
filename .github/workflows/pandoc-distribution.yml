@@ -1,0 +1,101 @@
+name: Private Pandoc development bundle
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: pandoc-development-bundle-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux-x64:
+    name: Unsigned Linux x64 offline conversion bundle
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Verify runner architecture
+        run: test "$RUNNER_ARCH" = "X64"
+
+      - name: Install GUI build and offline smoke prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libasound2-dev cmake libclang-dev strace
+
+      - name: Download and verify the pinned Pandoc runtime pack
+        run: |
+          archive="$RUNNER_TEMP/pandoc-3.14-linux-amd64.tar.gz"
+          curl --fail --location --retry 3 --output "$archive" https://github.com/jgm/pandoc/releases/download/3.14/pandoc-3.14-linux-amd64.tar.gz
+          source_archive="$RUNNER_TEMP/pandoc-3.14-source.tar.gz"
+          curl --fail --location --retry 3 --output "$source_archive" https://hackage.haskell.org/package/pandoc-3.14/pandoc-3.14.tar.gz
+          python3 packaging/pandoc_engine.py "$archive" "$RUNNER_TEMP/pandoc-pack" "$source_archive"
+
+      - name: Restore release Cargo cache
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: document-pandoc-release-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.toml', 'Cargo.lock') }}-linux-x64
+          restore-keys: |
+            document-pandoc-release-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build the application
+        env:
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+        run: cargo build --locked --release --bin document-studio -j 2
+
+      - name: Assemble, extract, and verify an unsigned offline bundle
+        run: |
+          set -euo pipefail
+          staging="$RUNNER_TEMP/document-studio"
+          mkdir -p "$staging"
+          cp target/release/document-studio "$staging/"
+          cp -R "$RUNNER_TEMP/pandoc-pack/engines" "$staging/"
+          cp -R "$RUNNER_TEMP/pandoc-pack/third-party" "$staging/"
+          input="$RUNNER_TEMP/offline-conversion.md"
+          printf '# Offline report\n\nUnicode: café and μ.\n' > "$input"
+          strace -f -qq -e trace=network -o "$RUNNER_TEMP/pandoc-package.trace" "$staging/document-studio" --cli convert-document "$input" "$RUNNER_TEMP/before-package.html" '{"title":"Offline report","language":"en-US"}'
+          if grep -Eq 'socket\(AF_INET6?,|connect\(.*sa_family=AF_INET6?' "$RUNNER_TEMP/pandoc-package.trace"; then
+            echo "The private conversion pack attempted IP network access" >&2
+            cat "$RUNNER_TEMP/pandoc-package.trace" >&2
+            exit 1
+          fi
+          grep -q '<title>Offline report</title>' "$RUNNER_TEMP/before-package.html"
+          mkdir -p dist
+          tar -C "$RUNNER_TEMP" -czf dist/document-studio-0.1.0-alpha.1-x86_64-unknown-linux-gnu-offline-pandoc-unsigned.tar.gz document-studio
+          mkdir "$RUNNER_TEMP/extracted"
+          tar -C "$RUNNER_TEMP/extracted" -xzf dist/*.tar.gz
+          strace -f -qq -e trace=network -o "$RUNNER_TEMP/pandoc-extracted.trace" "$RUNNER_TEMP/extracted/document-studio/document-studio" --cli convert-document "$input" "$RUNNER_TEMP/after-extraction.epub" ''
+          if grep -Eq 'socket\(AF_INET6?,|connect\(.*sa_family=AF_INET6?' "$RUNNER_TEMP/pandoc-extracted.trace"; then
+            echo "The extracted private conversion pack attempted IP network access" >&2
+            cat "$RUNNER_TEMP/pandoc-extracted.trace" >&2
+            exit 1
+          fi
+          python3 - "$RUNNER_TEMP/after-extraction.epub" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              assert archive.testzip() is None
+              assert archive.read("mimetype") == b"application/epub+zip"
+          print("Clean-directory private Pandoc conversion passed without IP network access")
+          PY
+          sha256sum dist/*.tar.gz | tee dist/SHA256SUMS
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: document-studio-linux-x64-offline-pandoc-unsigned
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
