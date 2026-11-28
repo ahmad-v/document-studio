@@ -98,7 +98,7 @@ fn load_task(path: PathBuf, job: Job) -> Task<Message> {
             .join()
             .unwrap_or_else(|_| Err("The EPUB loading worker stopped unexpectedly".into()))
         },
-        move |result| Message::Loaded(result_path, result),
+        move |result| Message::Loaded(result_path.clone(), result),
     )
 }
 
