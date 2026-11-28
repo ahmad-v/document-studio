@@ -123,10 +123,9 @@ def main() -> None:
         run(["cmake", "--build", str(build), "--parallel", "2"])
         run(["cmake", "--install", str(build)])
 
-        executable_candidates = list(prefix.rglob("tesseract"))
-        if len(executable_candidates) != 1 or not executable_candidates[0].is_file():
+        executable = prefix / "bin" / "tesseract"
+        if executable.is_symlink() or not executable.is_file():
             raise RuntimeError("Expected one installed Tesseract executable")
-        executable = executable_candidates[0]
         pack = args.output
         lib_dir = pack / "lib"
         notice_dir = pack / "notices"
