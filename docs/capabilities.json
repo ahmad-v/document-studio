@@ -97,12 +97,12 @@
     },
     {
       "operation": "pdf-preview",
-      "description": "Render a bounded PDF page preview and open the native workspace with bounded thumbnails, selected-page extraction and rotation, visual page-order controls, and save-to-new-copy reordering",
+      "description": "Bounded PDF raster preview and native workspace with page navigation, zoom, thumbnails, structural page tools, and case-insensitive text-layer search with matching-page navigation",
       "status": "implemented-unverified",
       "targets": [
         "x86_64-unknown-linux-gnu"
       ],
-      "fixture_status": "Synthetic two-page fixture rendered and decoded at 200x300; page selection and invalid-page refusal passed. Native open, session recents and selected-page extraction are implemented; current GUI and five-target verification pending."
+      "fixture_status": "PDF preview fixture passes; native text search has a two-page searchable-PDF fixture, query bounds and cancellation coverage. Hosted GUI integration and platform verification pending."
     },
     {
       "operation": "markdown-docx",
