@@ -17,16 +17,52 @@ from package import CFG, R, TARGETS, check_binary, payload, validate_host
 
 def stage_ocr(source, bundle, target):
     """Stage a reviewed Linux OCR pack without including unrelated source files."""
-    required_files = ("tesseract", "libraries.json", "tessdata/eng.traineddata")
+
+    def digest(path, expected, limit):
+        if not isinstance(expected, str) or len(expected) != 64:
+            raise ValueError(f"OCR provenance has no valid SHA-256 for {path.name}")
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > limit:
+            raise ValueError(f"Invalid or oversized OCR provenance file: {path.name}")
+        with path.open("rb") as stream:
+            actual = hashlib.file_digest(stream, "sha256").hexdigest()
+        if actual != expected:
+            raise ValueError(f"OCR provenance SHA-256 does not match {path.name}")
+
+    required_files = (
+        "tesseract", "libraries.json", "model-provenance.json",
+        "tessdata/eng.traineddata",
+    )
     directories = {
-        source: {"tesseract", "libraries.json", "lib", "notices", "tessdata"},
+        source: {
+            "tesseract", "libraries.json", "model-provenance.json",
+            "lib", "notices", "tessdata",
+        },
         source / "tessdata": {"eng.traineddata"},
     }
     for directory, names in directories.items():
         if directory.is_symlink() or not directory.is_dir():
             raise ValueError(f"Expected real OCR pack directory: {directory.name}")
-        if {entry.name for entry in directory.iterdir()} != names:
-            raise ValueError(f"Unexpected or missing OCR pack files in {directory.name}")
+        found = {entry.name for entry in directory.iterdir()}
+        if found != names:
+            raise ValueError(
+                f"Unexpected or missing OCR pack files in {directory.name}: "
+                f"missing={sorted(names - found)}, extra={sorted(found - names)}"
+            )
+
+    provenance_path = source / "model-provenance.json"
+    if provenance_path.is_symlink() or provenance_path.stat().st_size > 64 * 1024:
+        raise ValueError("Invalid or oversized OCR provenance record")
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    if provenance.get("schema_version") != 1:
+        raise ValueError("Unsupported OCR provenance schema")
+    checks = {
+        "tesseract": (provenance.get("engine", {}).get("binary_sha256"), 64 * 1024 * 1024),
+        "tessdata/eng.traineddata": (provenance.get("model", {}).get("sha256"), 64 * 1024 * 1024),
+        "libraries.json": (provenance.get("private_library_manifest_sha256"), 64 * 1024),
+        "notices/Tessdata-fast-LICENSE": (provenance.get("model", {}).get("license_sha256"), 64 * 1024),
+    }
+    for relative, (expected, limit) in checks.items():
+        digest(source / relative, expected, limit)
 
     files = list(required_files)
     for name in ("lib", "notices"):
@@ -57,8 +93,17 @@ def stage_ocr(source, bundle, target):
 
 def smoke_ocr(command, directory):
     fixture = R / "tests/fixtures/ocr-english.png"
+    network_trace = directory / "ocr-network.trace"
+    arguments = [command, "--cli", "ocr-png", fixture]
+    tracer = shutil.which("strace")
+    if os.environ.get("DOCUMENT_OCR_REQUIRE_NETWORK_TRACE") == "1" and not tracer:
+        raise SystemExit("strace is required for the offline OCR smoke check")
+    if tracer:
+        arguments = [
+            tracer, "-f", "-qq", "-e", "trace=network", "-o", str(network_trace), *arguments
+        ]
     result = subprocess.run(
-        [command, "--cli", "ocr-png", fixture],
+        arguments,
         cwd=directory,
         env={"PATH": os.defpath, "LC_ALL": "C"},
         capture_output=True,
@@ -71,6 +116,11 @@ def smoke_ocr(command, directory):
         raise SystemExit(f"Packaged OCR failed its reference fixture: {result.stderr.strip()}")
     if json.loads(result.stdout)["preview"].strip() != "LOCAL DOCUMENT OCR":
         raise SystemExit("Packaged OCR did not recognize the reference text")
+    if tracer:
+        trace = network_trace.read_text(encoding="utf-8")
+        if any(call in trace for call in ("socket(", "connect(", "sendto(", "sendmsg(")):
+            raise SystemExit("Packaged OCR attempted a network syscall during its offline smoke test")
+        network_trace.unlink()
 
 
 def main():
