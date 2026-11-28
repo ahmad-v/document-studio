@@ -14,6 +14,67 @@ use iced::{
 use localwright_core::{Job, Request};
 use std::{panic::AssertUnwindSafe, path::PathBuf, sync::Arc};
 
+const MAX_SEARCH_QUERY_CHARS: usize = 256;
+const MAX_SEARCH_TEXT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_SEARCH_HITS: usize = 100;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TextHit {
+    page: usize,
+    snippet: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TextSearchResults {
+    hits: Vec<TextHit>,
+    truncated: bool,
+}
+
+fn search_text_layer(
+    path: &std::path::Path,
+    query: &str,
+    job: &Job,
+) -> std::result::Result<TextSearchResults, String> {
+    let query = query.trim();
+    if query.is_empty()
+        || query.chars().count() > MAX_SEARCH_QUERY_CHARS
+        || query.chars().any(char::is_control)
+    {
+        return Err("Enter a search phrase of 1–256 printable characters".into());
+    }
+    let document = crate::load(path).map_err(|error| error.message)?;
+    let needle = query.to_lowercase();
+    let pages = document.get_pages();
+    let mut decoded_bytes = 0usize;
+    let mut hits = Vec::new();
+    let mut truncated = false;
+
+    for (index, page_number) in pages.keys().copied().enumerate() {
+        job.check().map_err(|error| error.message)?;
+        let page_text = document
+            .extract_text(&[page_number])
+            .map_err(|error| format!("Could not inspect PDF text layer: {error}"))?;
+        decoded_bytes = decoded_bytes
+            .checked_add(page_text.len())
+            .filter(|size| *size <= MAX_SEARCH_TEXT_BYTES)
+            .ok_or_else(|| "PDF text exceeds the 8 MiB search limit".to_owned())?;
+        if page_text.to_lowercase().contains(&needle) {
+            if hits.len() < MAX_SEARCH_HITS {
+                hits.push(TextHit {
+                    page: usize::try_from(page_number)
+                        .map_err(|_| "PDF page number is out of range".to_owned())?,
+                    snippet: page_text.chars().take(240).collect(),
+                });
+            } else {
+                truncated = true;
+            }
+        }
+        job.progress((index + 1) as u64, pages.len() as u64);
+    }
+
+    Ok(TextSearchResults { hits, truncated })
+}
+
 #[derive(Debug, Clone)]
 enum Message {
     Open,
@@ -43,6 +104,15 @@ enum Message {
     SelectPage(usize),
     PageInput(String),
     GoToPage,
+    SearchInput(String),
+    Search,
+    CancelSearch,
+    SearchFinished(
+        PathBuf,
+        String,
+        std::result::Result<TextSearchResults, String>,
+    ),
+    SelectSearchHit(usize),
     ZoomIn,
     ZoomOut,
     ActualSize,
@@ -62,6 +132,11 @@ struct Viewer {
     properties_summary: String,
     thumbnails: BoundedPageCache<image::Handle>,
     page_input: String,
+    search_query: String,
+    search_hits: Vec<TextHit>,
+    search_truncated: bool,
+    searching: bool,
+    search_job: Job,
     zoom: Option<f32>,
     status: String,
     recent: Vec<PathBuf>,
@@ -98,6 +173,26 @@ fn render_task(
             .unwrap_or_else(|_| Err("The PDF preview worker stopped unexpectedly".into()))
         },
         move |result| Message::Rendered(display_position, result),
+    )
+}
+
+fn search_task(path: PathBuf, query: String, job: Job) -> Task<Message> {
+    let result_path = path.clone();
+    let result_query = query.clone();
+    Task::perform(
+        async move {
+            let worker_path = path.clone();
+            let worker_query = query.clone();
+            std::thread::spawn(move || {
+                std::panic::catch_unwind(AssertUnwindSafe(|| {
+                    search_text_layer(&worker_path, &worker_query, &job)
+                }))
+                .unwrap_or_else(|_| Err("PDF text search stopped unexpectedly".into()))
+            })
+            .join()
+            .unwrap_or_else(|_| Err("PDF text search worker stopped unexpectedly".into()))
+        },
+        move |result| Message::SearchFinished(result_path.clone(), result_query.clone(), result),
     )
 }
 
@@ -244,6 +339,12 @@ fn merge_task(source: PathBuf, output: PathBuf, second_input: String, job: Job) 
 
 impl Viewer {
     fn open_path(&mut self, path: PathBuf) -> Task<Message> {
+        self.search_job.cancel();
+        self.searching = false;
+        self.search_job = Job::new();
+        self.search_query.clear();
+        self.search_hits.clear();
+        self.search_truncated = false;
         self.path = path.clone();
         remember_recent(&mut self.recent, path);
         self.page = 1;
@@ -654,6 +755,61 @@ impl Viewer {
                 }
                 self.status = format!("Enter a page from 1 to {}", self.pages);
             }
+            Message::SearchInput(query) => {
+                if self.searching {
+                    self.search_job.cancel();
+                    self.searching = false;
+                    self.search_job = Job::new();
+                }
+                self.search_query = query;
+                self.search_hits.clear();
+                self.search_truncated = false;
+            }
+            Message::Search if !self.loading && !self.processing && !self.searching => {
+                self.search_hits.clear();
+                self.search_truncated = false;
+                self.searching = true;
+                self.search_job = Job::new();
+                self.status = "Searching the PDF text layer…".into();
+                return search_task(
+                    self.path.clone(),
+                    self.search_query.clone(),
+                    self.search_job.clone(),
+                );
+            }
+            Message::CancelSearch if self.searching => {
+                self.search_job.cancel();
+                self.status = "Cancellation requested; search stops between pages".into();
+            }
+            Message::SearchFinished(path, query, result)
+                if path == self.path && query == self.search_query =>
+            {
+                self.searching = false;
+                self.search_job = Job::new();
+                match result {
+                    Ok(results) => {
+                        let count = results.hits.len();
+                        self.search_hits = results.hits;
+                        self.search_truncated = results.truncated;
+                        self.status = if results.truncated {
+                            format!("Found at least {count} matching pages; result list is capped at {MAX_SEARCH_HITS}")
+                        } else {
+                            format!("Found {count} matching pages in the PDF text layer")
+                        };
+                    }
+                    Err(error) => {
+                        self.status = format!("Could not search the PDF text layer: {error}")
+                    }
+                }
+            }
+            Message::SelectSearchHit(source_page) if !self.loading => {
+                if let Some(position) = self.page_order.iter().position(|page| *page == source_page)
+                {
+                    return self.request_page(position + 1);
+                }
+                self.status =
+                    "The matching source page is no longer in the current page order".into();
+            }
             Message::ZoomIn => {
                 self.zoom = Some((self.zoom.unwrap_or(1.0) * 1.2).min(4.0));
             }
@@ -788,6 +944,54 @@ impl Viewer {
         } else {
             go
         };
+        let search = button(if self.searching {
+            "Searching…"
+        } else {
+            "Find in PDF"
+        })
+        .on_press_maybe(
+            (!self.loading && !self.processing && !self.searching).then_some(Message::Search),
+        );
+        let cancel_search =
+            button("Cancel search").on_press_maybe(self.searching.then_some(Message::CancelSearch));
+        let search_controls = row![
+            text_input("Search the PDF text layer", &self.search_query)
+                .on_input(Message::SearchInput)
+                .on_submit(Message::Search)
+                .width(Length::Fill),
+            search,
+            cancel_search,
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center);
+        let search_results: Element<'_, Message> = if self.search_hits.is_empty() {
+            text(if self.searching {
+                "Search checks the PDF text layer; scanned-page OCR is not integrated here."
+            } else {
+                "No matching pages. Scanned-page OCR is not integrated here."
+            })
+            .size(12)
+            .into()
+        } else {
+            let mut hits =
+                column![text("Matching pages (select a result to navigate)").size(12)].spacing(4);
+            for hit in &self.search_hits {
+                let label = format!("Page {}: {}", hit.page, hit.snippet);
+                hits =
+                    hits.push(button(text(label).size(12)).on_press_maybe(
+                        (!self.loading).then_some(Message::SelectSearchHit(hit.page)),
+                    ));
+            }
+            if self.search_truncated {
+                hits = hits.push(
+                    text(format!(
+                        "Showing the first {MAX_SEARCH_HITS} matching pages"
+                    ))
+                    .size(12),
+                );
+            }
+            scrollable(hits).height(Length::Fixed(120.0)).into()
+        };
         let mut thumbnails = row![].spacing(8).align_y(iced::Alignment::Center);
         for position in page_window(self.page, self.pages) {
             let page = self
@@ -914,6 +1118,8 @@ impl Viewer {
             controls,
             reorder_controls,
             structure_controls,
+            search_controls,
+            search_results,
             scrollable(row(recent).spacing(6))
                 .direction(scrollable::Direction::Horizontal(
                     scrollable::Scrollbar::default(),
@@ -961,6 +1167,11 @@ pub(super) fn run(path: PathBuf, initial_page: usize) -> std::result::Result<(),
         properties_summary: String::new(),
         thumbnails: BoundedPageCache::default(),
         page_input: initial_page.to_string(),
+        search_query: String::new(),
+        search_hits: Vec::new(),
+        search_truncated: false,
+        searching: false,
+        search_job: Job::new(),
         zoom: None,
         status: format!("Rendering page {initial_page}…"),
         recent: vec![path.clone()],
@@ -993,8 +1204,49 @@ pub(super) fn run(path: PathBuf, initial_page: usize) -> std::result::Result<(),
 
 #[cfg(test)]
 mod tests {
-    use super::remember_recent;
+    use super::{remember_recent, search_text_layer};
+    use localwright_core::Job;
+    use lopdf::{dictionary, Document, Object};
     use std::path::{Path, PathBuf};
+    use tempfile::tempdir;
+
+    fn write_searchable_pdf(path: &Path) {
+        let mut document = Document::with_version("1.7");
+        let parent = document.new_object_id();
+        let font = document.add_object(dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type1",
+            "BaseFont" => "Helvetica",
+        });
+        let resources = document.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font },
+        });
+        let mut pages = Vec::new();
+        for content in ["Alpha document", "needle on page two"] {
+            let stream = document.add_object(lopdf::Stream::new(
+                dictionary! {},
+                format!("BT /F1 12 Tf 20 20 Td ({content}) Tj ET").into_bytes(),
+            ));
+            pages.push(document.add_object(dictionary! {
+                "Type" => "Page",
+                "Parent" => parent,
+                "Contents" => stream,
+                "Resources" => resources,
+            }));
+        }
+        document.objects.insert(
+            parent,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => pages.iter().copied().map(Object::Reference).collect::<Vec<_>>(),
+                "Count" => 2,
+                "MediaBox" => vec![0.into(), 0.into(), 200.into(), 300.into()],
+            }),
+        );
+        let root = document.add_object(dictionary! { "Type" => "Catalog", "Pages" => parent });
+        document.trailer.set("Root", root);
+        document.save(path).unwrap();
+    }
 
     #[test]
     fn recent_documents_are_deduplicated_and_bounded() {
@@ -1013,5 +1265,24 @@ mod tests {
             1
         );
         assert!(!recent.contains(&PathBuf::from("0.pdf")));
+    }
+
+    #[test]
+    fn text_search_finds_pages_case_insensitively_and_rejects_unbounded_queries() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("searchable.pdf");
+        write_searchable_pdf(&path);
+
+        let results = search_text_layer(&path, "NEEDLE", &Job::new()).unwrap();
+        assert_eq!(results.hits.len(), 1);
+        assert_eq!(results.hits[0].page, 2);
+        assert!(results.hits[0].snippet.contains("needle on page two"));
+        assert!(!results.truncated);
+        assert!(search_text_layer(&path, "  ", &Job::new()).is_err());
+        assert!(search_text_layer(&path, &"x".repeat(257), &Job::new()).is_err());
+
+        let cancelled = Job::new();
+        cancelled.cancel();
+        assert!(search_text_layer(&path, "needle", &cancelled).is_err());
     }
 }
