@@ -9,6 +9,7 @@ mod markdown_epub;
 #[cfg(feature = "ocr")]
 mod ocr;
 mod pdf_compare;
+mod pdf_page_compare;
 #[cfg(feature = "gui")]
 mod pdf_viewer;
 mod pdf_workspace;
@@ -38,6 +39,7 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"pdf-preview",label:"Render PDF page preview",hint:"Render one 1-based page to a bounded PNG. Enter the page number (default 1) and choose a new .png output. Raster preview only; rendering fidelity and unsupported PDF features may vary."},
  Operation{id:"pdf-text",label:"PDF text",hint:"Extract text from PDF text layer. Optional new .txt output. No OCR."},
  Operation{id:"pdf-compare",label:"Compare PDFs",hint:"Enter the second PDF path. Compare page count, Info metadata, extracted text, page dimensions and bounded low-resolution rendered pixels. Writes a new .json report; this is not a signature, full object, accessibility, or archival fidelity comparison."},
+ Operation{id:"pdf-page-compare",label:"Compare selected PDF pages visually",hint:"Create a side-by-side PNG from bounded Hayro renders of selected pages. Parameter JSON: {\"second_pdf\":\"/path/to/other.pdf\",\"first_page\":1,\"second_page\":1}. This compares rendered pixels only; it does not compare text, metadata or document structure."},
  Operation{id:"pdf-split",label:"PDF page range",hint:"Parameter inclusive page range, e.g. 2-4. New .pdf output. Experimental; not sanitization."},
  Operation{id:"pdf-rotate",label:"Rotate PDF pages",hint:"Enter start-end,degrees, e.g. 2-4,90. Use 90, 180 or 270 clockwise. Choose a new PDF."},
  Operation{id:"pdf-reorder",label:"Reorder PDF pages",hint:"Enter every page once, in the desired order, e.g. 3,1,2. Choose a new .pdf output."},
@@ -827,6 +829,20 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
             write_bytes(&r.output, report.as_bytes())?;
             written = Some(r.output);
             warnings.push("The report compares page count, selected Info metadata, text-layer extraction, page dimensions and low-resolution raster previews. Hayro rendering is not complete PDF fidelity; annotations, forms, tags, signatures, embedded files, scripts and complete object structure are not compared. Parsing and rendering are in-process, not sandboxed, and input bounds do not impose a hard CPU/memory quota.".into());
+            report
+        }
+        "pdf-page-compare" => {
+            extension(&r.output, "png")?;
+            let (composite, report) = pdf_page_compare::compare(&r.input, &r.parameter, &j)?;
+            let report = serde_json::to_string_pretty(&report)?;
+            j.check()?;
+            write_new(&r.output, |file| {
+                image::DynamicImage::ImageRgba8(composite)
+                    .write_to(file, image::ImageFormat::Png)
+                    .map_err(err)
+            })?;
+            written = Some(r.output);
+            warnings.push("This output is a side-by-side PNG of bounded Hayro page renders. Pixel identity applies only to this renderer; this route does not compare text, metadata or complete PDF structure, and PDF rendering is not sandboxed.".into());
             report
         }
         "pdf-split" | "pdf-merge" | "pdf-reorder" | "pdf-delete-pages" | "pdf-rotate" => {
