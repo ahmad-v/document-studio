@@ -1,6 +1,5 @@
 //! Experimental PNG OCR through an application-private Tesseract executable.
 
-#[cfg(not(target_os = "windows"))]
 use localwright_core::{
     engine::{EngineInvocation, EngineRunOptions, EngineRuntime, EngineSpec},
     Capability,
