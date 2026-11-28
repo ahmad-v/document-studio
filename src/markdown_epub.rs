@@ -45,22 +45,31 @@ pub(crate) fn convert(path: &Path, metadata_json: &str, job: &Job) -> Result<Vec
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
-    let mut events = Vec::new();
-    for event in Parser::new_ext(source, options) {
-        job.check()?;
-        match event {
-            // Keep visible text but discard navigation and image URLs. Markdown
-            // raw HTML is rendered as escaped text, never interpreted as markup.
-            Event::Start(Tag::Link { .. })
-            | Event::End(TagEnd::Link)
-            | Event::Start(Tag::Image { .. })
-            | Event::End(TagEnd::Image) => {}
-            Event::Html(text) | Event::InlineHtml(text) => events.push(Event::Text(text)),
-            other => events.push(other),
-        }
-    }
     let mut body = String::new();
-    html::push_html(&mut body, events.into_iter());
+    let mut cancelled = false;
+    {
+        let events = Parser::new_ext(source, options)
+            .take_while(|_| {
+                cancelled = job.check().is_err();
+                !cancelled
+            })
+            .filter_map(|event| {
+                match event {
+                    // Keep visible text but discard navigation and image URLs. Markdown
+                    // raw HTML is rendered as escaped text, never interpreted as markup.
+                    Event::Start(Tag::Link { .. })
+                    | Event::End(TagEnd::Link)
+                    | Event::Start(Tag::Image { .. })
+                    | Event::End(TagEnd::Image) => None,
+                    Event::Html(text) | Event::InlineHtml(text) => Some(Event::Text(text)),
+                    other => Some(other),
+                }
+            });
+        html::push_html(&mut body, events);
+    }
+    if cancelled {
+        job.check()?;
+    }
     let title = metadata.title.unwrap_or_else(|| default_title(path));
     let language = metadata.language.unwrap_or_else(|| "und".to_owned());
     let title_xml = xml_escape(&title);
