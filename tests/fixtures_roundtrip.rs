@@ -66,7 +66,7 @@ fn pdf_information_fixture() {
             .unwrap()
             .len()
     );
-    assert!(report["title"].is_null());
+    assert_eq!(report["title"], "untitled");
 }
 
 #[test]

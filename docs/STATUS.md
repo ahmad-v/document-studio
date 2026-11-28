@@ -13,8 +13,8 @@ Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_
 | compare-text | UTF-8 line changes with optional plain-text report | Linux integration fixture-tested |
 | citation-validate | Bounded CSL JSON bibliography validation | Linux route tests passed; hosted matrix pending |
 | citation-convert | CSL JSON/RIS interchange and CSL JSON/RIS to BibTeX export | Linux round-trip and route tests passed; hosted matrix pending |
-| pdf-info | PDF version, page count, file size and available title/author/subject/creator/producer metadata; optional JSON | Local metadata unit and PDF fixture tests passed; GUI verification pending |
-| pdf-preview | Bounded one-page raster PNG and native paginated viewer with selected-page dimensions and document metadata | Synthetic two-page Linux fixture passed; local GUI build pending due workspace disk limit |
+| pdf-info | PDF version, page count, file size and available title/author/subject/creator/producer metadata; optional JSON | Local metadata unit and PDF information fixture tests passed; default GUI library check passed; hosted matrix pending |
+| pdf-preview | Bounded one-page raster PNG and native paginated viewer with selected-page dimensions and document metadata | Synthetic two-page Linux fixture passed; default GUI library check passed; hosted integration and native matrix pending |
 | pdf-text | PDF text-layer extraction | Linux fixture-tested |
 | pdf-split | Experimental inclusive page-range extraction; native viewer saves the selected range to a new page-only PDF | Linux fixture-tested; native workflow source tests added, hosted GUI verification pending |
 | pdf-reorder | Experimental page-only PDF reordering | Linux fixture-tested |

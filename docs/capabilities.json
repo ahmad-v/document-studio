@@ -79,7 +79,7 @@
       "description": "PDF version, page count, file size and available Info-dictionary metadata; optional JSON. Native preview shows selected-page dimensions.",
       "status": "implemented-unverified",
       "targets": [],
-      "fixture_status": "Unicode metadata, control-character filtering, optional-field handling and file-size unit test passed; PDF information fixture passed. GUI build not run locally because available workspace storage fell below 400 MiB."
+      "fixture_status": "Unicode metadata, control-character filtering, optional-field handling and file-size unit tests passed; PDF information fixture and default GUI library check passed locally; hosted matrix pending."
     },
     {
       "operation": "pdf-preview",
