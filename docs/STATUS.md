@@ -10,6 +10,8 @@ Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_
 | ocr-png | Optional private Tesseract and English data | Linux x64 smoke-tested |
 | ocr-png-pdf | One-page searchable PDF from a PNG with optional private OCR | Linux x86_64 CLI and independent reader smoke-tested |
 | docx-text | UTF-8 WordprocessingML main-body plain text | Linux fixture and independent reader-tested |
+| epub-inspect | Bounded EPUB package metadata/container/spine inspection through the native operation workspace | Source and fixtures added; hosted verification pending; not complete EPUB validation |
+| epub-text | Ordered plain-text extraction from declared UTF-8 XHTML spine items | Source and fixtures added; hosted verification pending; layout and non-text content omitted |
 | compare-text | UTF-8 line changes with optional plain-text report | Linux integration fixture-tested |
 | citation-validate | Bounded CSL JSON bibliography validation | Linux route tests passed; hosted matrix pending |
 | citation-convert | CSL JSON/RIS interchange and CSL JSON/RIS to BibTeX export | Linux round-trip and route tests passed; hosted matrix pending |
@@ -23,7 +25,7 @@ Alpha source is on GitHub. The initial Rust integration checks ran on Linux x86_
 
 ## Known gaps
 
-Basic DOCX creation and body-text extraction; inline Markdown and layout omitted. Hayro 0.9.0 now renders selected PDF pages to bounded PNG previews and opens a separate native paginated viewer. Synthetic pixel fixtures pass, but GUI/platform checks remain pending and the renderer omits some PDF features. PDF parsing and decompression limits are incomplete, active content can survive structural edits, and these operations are not redaction or sanitization. Page-only merge/reorder/delete may drop page annotations, document-level metadata, bookmarks and forms, and may lose inherited or unusual structures. No standard OCR pack, Office fidelity, legacy converters, or structural and visual comparison.
+Basic DOCX creation and body-text extraction; inline Markdown and layout omitted. EPUB has bounded metadata/spine inspection and plain-text extraction, but no layout, CSS, image, navigation, DRM, or complete conformance support. Hayro 0.9.0 renders selected PDF pages to bounded PNG previews and opens a native paginated viewer; unsupported PDF features may be omitted. PDF parsing and decompression limits are incomplete, active content can survive structural edits, and these operations are not redaction or sanitization. Page-only merge/reorder/delete may drop page annotations, document-level metadata, bookmarks and forms, and may lose inherited or unusual structures. No standard OCR pack, Office fidelity, legacy converters, or structural and visual comparison.
 
 Private OCR uses Localwright's bounded runtime for ordinary UTF-8 engine invocations, including no-console process creation on Windows. Linux private-library loading and non-UTF-8 paths retain a narrow compatibility runner. Runtime adoption does not make the process an OS sandbox; offline pack, distribution and clean-host verification remain separate.
 

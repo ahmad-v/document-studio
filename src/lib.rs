@@ -2,6 +2,7 @@
 mod citations;
 mod compare;
 mod docx_text;
+mod epub;
 #[cfg(feature = "ocr")]
 mod ocr;
 #[cfg(feature = "gui")]
@@ -19,6 +20,8 @@ pub const OPERATIONS:&[Operation]=&[
  Operation{id:"markdown-docx",label:"Markdown to DOCX",hint:"Basic headings and plain paragraphs only. Choose new .docx output."},
  Operation{id:"text-docx",label:"Plain text to DOCX",hint:"Convert UTF-8 text to literal DOCX paragraphs. Choose a new .docx output."},
  Operation{id:"docx-text",label:"DOCX body text",hint:"Extract plain text from a DOCX document body. Optional new .txt output."},
+ Operation{id:"epub-inspect",label:"Inspect EPUB package",hint:"Inspect bounded EPUB container, metadata and spine structure. Optional new .json report. This is not a complete EPUB conformance validator or layout renderer."},
+ Operation{id:"epub-text",label:"Extract EPUB text",hint:"Extract UTF-8 XHTML body text in reading order. Optional new .txt output. Styles, images, scripts, navigation and page layout are not rendered."},
  Operation{id:"compare-text",label:"Compare text files",hint:"Enter the second UTF-8 text file path as the parameter. Optional new .txt report."},
  Operation{id:"citation-convert",label:"Convert citation records",hint:"Parameter format pair: csl-json->ris, ris->csl-json, csl-json->bibtex, or ris->bibtex. Choose a new output with .json, .ris, or .bib extension."},
  Operation{id:"citation-validate",label:"Validate CSL JSON bibliography",hint:"Validate one CSL JSON object or array (up to 10,000 records). Optional new .json report."},
@@ -565,6 +568,35 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
             }
             warnings.push("Body text only. Layout, list markers, headers, images and annotations are omitted. Hidden body text may appear.".into());
             text.chars().take(24000).collect()
+        }
+        "epub-inspect" => {
+            let report = epub::inspect(&r.input, &j)?;
+            let report = serde_json::to_string_pretty(&report)?;
+            if !r.output.as_os_str().is_empty() {
+                extension(&r.output, "json")?;
+                j.check()?;
+                write_bytes(&r.output, report.as_bytes())?;
+                written = Some(r.output);
+            }
+            warnings.push("Structural inspection only. The package is not checked against every EPUB conformance rule and is not rendered.".into());
+            report
+        }
+        "epub-text" => {
+            let text = epub::extract_text(&r.input, &j)?;
+            if !r.output.as_os_str().is_empty() {
+                extension(&r.output, "txt")?;
+                j.check()?;
+                write_bytes(&r.output, text.as_bytes())?;
+                written = Some(r.output);
+            }
+            warnings.push("Plain text only, in EPUB spine order. CSS, page layout, images, tables as layout, scripts, navigation, annotations and DRM-protected content are not converted.".into());
+            let mut preview = text.chars().take(24000).collect::<String>();
+            if preview.len() < text.len() {
+                preview.push_str(
+                    "\n[Preview truncated. Save a text report to see the extracted content.]",
+                );
+            }
+            preview
         }
         "compare-text" => {
             let report = compare::compare(&r.input, Path::new(&r.parameter), &j)?;
