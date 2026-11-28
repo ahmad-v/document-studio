@@ -81,7 +81,9 @@ jobs:
           set -euo pipefail
           archive="$RUNNER_TEMP/pandoc-3.14-linux-amd64.tar.gz"
           curl --fail --location --retry 3 --output "$archive" https://github.com/jgm/pandoc/releases/download/3.14/pandoc-3.14-linux-amd64.tar.gz
-          python3 packaging/pandoc_engine.py "$archive" "$RUNNER_TEMP/pandoc-pack"
+          source_archive="$RUNNER_TEMP/pandoc-3.14-source.tar.gz"
+          curl --fail --location --retry 3 --output "$source_archive" https://hackage.haskell.org/package/pandoc-3.14/pandoc-3.14.tar.gz
+          python3 packaging/pandoc_engine.py "$archive" "$RUNNER_TEMP/pandoc-pack" "$source_archive"
           cp -R "$RUNNER_TEMP/pandoc-pack/engines" target/debug/
           cp -R "$RUNNER_TEMP/pandoc-pack/third-party" target/debug/
           input="$RUNNER_TEMP/pandoc-input.md"

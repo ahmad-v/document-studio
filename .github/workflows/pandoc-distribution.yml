@@ -35,7 +35,9 @@ jobs:
         run: |
           archive="$RUNNER_TEMP/pandoc-3.14-linux-amd64.tar.gz"
           curl --fail --location --retry 3 --output "$archive" https://github.com/jgm/pandoc/releases/download/3.14/pandoc-3.14-linux-amd64.tar.gz
-          python3 packaging/pandoc_engine.py "$archive" "$RUNNER_TEMP/pandoc-pack"
+          source_archive="$RUNNER_TEMP/pandoc-3.14-source.tar.gz"
+          curl --fail --location --retry 3 --output "$source_archive" https://hackage.haskell.org/package/pandoc-3.14/pandoc-3.14.tar.gz
+          python3 packaging/pandoc_engine.py "$archive" "$RUNNER_TEMP/pandoc-pack" "$source_archive"
 
       - name: Restore release Cargo cache
         uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4

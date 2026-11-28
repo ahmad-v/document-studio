@@ -19,6 +19,9 @@ class PandocPackTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.archive = self.root / "pandoc.tar.gz"
+        self.source_archive = self.root / "pandoc-source.tar.gz"
+        self.source_bytes = b"corresponding source archive fixture"
+        self.source_archive.write_bytes(self.source_bytes)
         self.binary = b"private pandoc binary fixture"
         with tarfile.open(self.archive, "w:gz") as archive:
             member = tarfile.TarInfo(PACKER.MEMBER)
@@ -33,14 +36,25 @@ class PandocPackTests(unittest.TestCase):
         pack = PACKER.create_pack(
             self.archive,
             self.root / "pack",
-            self.archive.stat().st_size,
-            PACKER.digest(self.archive),
+            self.source_archive,
+            archive_size=self.archive.stat().st_size,
+            archive_sha256=PACKER.digest(self.archive),
+            source_size=self.source_archive.stat().st_size,
+            source_sha256=PACKER.digest(self.source_archive),
         )
-        PACKER.verify_pack(pack, hashlib.sha256(self.binary).hexdigest())
+        PACKER.verify_pack(
+            pack,
+            hashlib.sha256(self.binary).hexdigest(),
+            PACKER.digest(self.source_archive),
+        )
         executable = pack / "engines/pandoc/bin/pandoc"
         self.assertEqual(executable.read_bytes(), self.binary)
         self.assertTrue(executable.stat().st_mode & 0o111)
         self.assertIn("GPL-2.0-or-later", (pack / "engines/manifest.json").read_text())
+        self.assertEqual(
+            (pack / "third-party/Pandoc" / PACKER.SOURCE_ASSET).read_bytes(),
+            self.source_bytes,
+        )
 
     def test_rejects_source_hash_mismatch(self):
         with self.assertRaisesRegex(ValueError, "SHA-256"):

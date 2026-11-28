@@ -13,6 +13,9 @@ ASSET = f"pandoc-{VERSION}-linux-amd64.tar.gz"
 MEMBER = f"pandoc-{VERSION}/bin/pandoc"
 ARCHIVE_SIZE = 36_635_549
 ARCHIVE_SHA256 = "c5f4720cdefb3f7bdc5d07202ef579feef0d1370773c873804dd8fdaa8c4f1b8"
+SOURCE_ASSET = f"pandoc-{VERSION}.tar.gz"
+SOURCE_SIZE = 7_562_354
+SOURCE_SHA256 = "94804ddd05c67e9ad91740e7c010ba4ed4da96fada0f0b66d668e90cdd8aea38"
 COPYING_SHA256 = "3ebfbf9235b049d384cdba5a66a1a3434bb544391e720b76faa8e1b3ee61a4e5"
 COPYRIGHT_SHA256 = "842e33ef01625e93f85bebb8bac83aa570186b7aa77a09971257cc29f8f60740"
 MAX_BINARY_BYTES = 192 * 1024 * 1024
@@ -65,6 +68,13 @@ def verify_archive(path, size=ARCHIVE_SIZE, sha256=ARCHIVE_SHA256):
         raise ValueError("Pandoc source archive SHA-256 differs from the pinned release")
 
 
+def verify_source(path, size=SOURCE_SIZE, sha256=SOURCE_SHA256):
+    if not path.is_file() or path.stat().st_size != size:
+        raise ValueError("Pandoc corresponding source archive size differs from the pinned release")
+    if digest(path) != sha256:
+        raise ValueError("Pandoc corresponding source archive SHA-256 differs from the pinned release")
+
+
 def extract_binary(archive_path, destination):
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -93,7 +103,7 @@ def extract_binary(archive_path, destination):
         raise
 
 
-def verify_pack(pack, engine_sha256=None):
+def verify_pack(pack, engine_sha256=None, source_sha256=SOURCE_SHA256):
     engines = pack / "engines"
     executable = engines / "pandoc" / "bin" / "pandoc"
     manifest_path = engines / "manifest.json"
@@ -109,6 +119,7 @@ def verify_pack(pack, engine_sha256=None):
         "engines/pandoc/bin/pandoc",
         "third-party/Pandoc/COPYING.md",
         "third-party/Pandoc/COPYRIGHT",
+        f"third-party/Pandoc/{SOURCE_ASSET}",
     }
     if actual_entries != expected_entries:
         raise ValueError("Pandoc pack contains missing or unexpected files")
@@ -126,10 +137,22 @@ def verify_pack(pack, engine_sha256=None):
         notice = pack / "third-party" / "Pandoc" / name
         if notice.is_symlink() or not notice.is_file() or digest(notice) != expected:
             raise ValueError(f"Pandoc redistribution notice failed verification: {name}")
+    source = pack / "third-party" / "Pandoc" / SOURCE_ASSET
+    if source.is_symlink() or not source.is_file() or digest(source) != source_sha256:
+        raise ValueError("Pandoc corresponding source archive failed verification")
 
 
-def create_pack(archive, destination, archive_size=ARCHIVE_SIZE, archive_sha256=ARCHIVE_SHA256):
+def create_pack(
+    archive,
+    destination,
+    source_archive,
+    archive_size=ARCHIVE_SIZE,
+    archive_sha256=ARCHIVE_SHA256,
+    source_size=SOURCE_SIZE,
+    source_sha256=SOURCE_SHA256,
+):
     verify_archive(archive, archive_size, archive_sha256)
+    verify_source(source_archive, source_size, source_sha256)
     destination.mkdir(parents=True, exist_ok=False)
     try:
         executable = destination / "engines" / "pandoc" / "bin" / "pandoc"
@@ -146,7 +169,8 @@ def create_pack(archive, destination, archive_size=ARCHIVE_SIZE, archive_sha256=
             if not source.is_file() or digest(source) != expected:
                 raise ValueError(f"Checked-in Pandoc redistribution notice failed verification: {name}")
             shutil.copyfile(source, notice_dir / name)
-        verify_pack(destination, executable_hash)
+        shutil.copyfile(source_archive, notice_dir / SOURCE_ASSET)
+        verify_pack(destination, executable_hash, source_sha256)
         return destination
     except Exception:
         shutil.rmtree(destination, ignore_errors=True)
@@ -157,9 +181,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path, help=f"official {ASSET} release asset")
     parser.add_argument("destination", type=Path, help="new output directory")
+    parser.add_argument("source_archive", type=Path, help=f"corresponding Hackage {SOURCE_ASSET}")
     args = parser.parse_args()
     try:
-        create_pack(args.archive, args.destination)
+        create_pack(args.archive, args.destination, args.source_archive)
     except (OSError, ValueError, tarfile.TarError) as error:
         parser.error(str(error))
     print(args.destination)
