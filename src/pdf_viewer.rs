@@ -809,7 +809,7 @@ impl Viewer {
                         rfd::AsyncFileDialog::new()
                             .set_title("Save PDF comparison report")
                             .add_filter("JSON report", &["json"])
-                            .set_file_name(&format!("{stem}-comparison.json"))
+                            .set_file_name(format!("{stem}-comparison.json"))
                             .save_file()
                             .await
                             .map(|file| (source, second, parameter, file.path().to_path_buf()))

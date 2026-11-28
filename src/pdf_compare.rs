@@ -235,7 +235,7 @@ fn pixel_metrics(before: &PagePixels, after: &PagePixels) -> PixelMetrics {
     if before.width != after.width
         || before.height != after.height
         || before.pixels.len() != after.pixels.len()
-        || before.pixels.len() % 4 != 0
+        || !before.pixels.len().is_multiple_of(4)
     {
         return PixelMetrics {
             changed_pixels: None,
