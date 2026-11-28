@@ -42,8 +42,12 @@ def stage_ocr(source, bundle, target):
     for directory, names in directories.items():
         if directory.is_symlink() or not directory.is_dir():
             raise ValueError(f"Expected real OCR pack directory: {directory.name}")
-        if {entry.name for entry in directory.iterdir()} != names:
-            raise ValueError(f"Unexpected or missing OCR pack files in {directory.name}")
+        found = {entry.name for entry in directory.iterdir()}
+        if found != names:
+            raise ValueError(
+                f"Unexpected or missing OCR pack files in {directory.name}: "
+                f"missing={sorted(names - found)}, extra={sorted(found - names)}"
+            )
 
     provenance_path = source / "model-provenance.json"
     if provenance_path.is_symlink() or provenance_path.stat().st_size > 64 * 1024:

@@ -175,9 +175,6 @@ def main() -> None:
             "\n".join(f"{name}\t{version}" for name, version in sorted(package_versions.items())) + "\n",
             encoding="utf-8",
         )
-        (pack / "tesseract-source-license.txt").write_text(
-            (source / "LICENSE").read_text(encoding="utf-8"), encoding="utf-8"
-        )
         # Embed every private-library digest and the executable/model digests
         # into the application at compile time via the artifact pins file.
         executable_sha = hashlib.sha256((pack / "tesseract").read_bytes()).hexdigest()
