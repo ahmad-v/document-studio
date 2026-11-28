@@ -53,6 +53,20 @@ struct OpfMetadata {
     spine: Vec<Item>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct EpubBook {
+    pub(crate) title: Option<String>,
+    pub(crate) creators: Vec<String>,
+    pub(crate) language: Option<String>,
+    pub(crate) chapters: Vec<EpubChapter>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EpubChapter {
+    pub(crate) label: String,
+    pub(crate) text: String,
+}
+
 pub fn inspect(path: &Path, job: &Job) -> Result<serde_json::Value> {
     let Package {
         title,
@@ -74,18 +88,39 @@ pub fn inspect(path: &Path, job: &Job) -> Result<serde_json::Value> {
 }
 
 pub fn extract_text(path: &Path, job: &Job) -> Result<String> {
+    let book = read_book(path, job)?;
+    let mut output = String::new();
+    if let Some(title) = &book.title {
+        append_bounded(&mut output, title, job)?;
+        append_bounded(&mut output, "\n\n", job)?;
+    }
+    for (index, chapter) in book.chapters.iter().enumerate() {
+        job.check()?;
+        if index > 0 && !output.ends_with("\n\n") {
+            append_bounded(&mut output, "\n", job)?;
+        }
+        append_bounded(&mut output, &chapter.text, job)?;
+        if !output.ends_with('\n') {
+            append_bounded(&mut output, "\n", job)?;
+        }
+    }
+    Ok(output)
+}
+
+pub(crate) fn read_book(path: &Path, job: &Job) -> Result<EpubBook> {
     let Package {
         title,
+        creators,
+        language,
         spine,
         members,
         mut archive,
         ..
     } = load(path, job)?;
-    let mut output = String::new();
-    if let Some(title) = &title {
-        append_bounded(&mut output, title, job)?;
-        append_bounded(&mut output, "\n\n", job)?;
-    }
+    let mut extracted_bytes = title
+        .as_ref()
+        .map_or(0, |value| value.len().saturating_add(2));
+    let mut chapters = Vec::with_capacity(spine.len());
     for (index, item) in spine.iter().enumerate() {
         job.check()?;
         if item.media_type != "application/xhtml+xml" {
@@ -101,15 +136,37 @@ pub fn extract_text(path: &Path, job: &Job) -> Result<String> {
         if chapter.trim().is_empty() {
             continue;
         }
-        if index > 0 && !output.ends_with("\n\n") {
-            append_bounded(&mut output, "\n", job)?;
+        extracted_bytes = extracted_bytes
+            .checked_add(chapter.len())
+            .and_then(|size| size.checked_add(2))
+            .ok_or_else(|| Error::input("EPUB extracted text size overflow"))?;
+        if extracted_bytes > MAX_EXTRACTED_BYTES {
+            return Err(Error::new(
+                ErrorKind::Limit,
+                "EPUB extracted text exceeds 8 MiB",
+            ));
         }
-        append_bounded(&mut output, &chapter, job)?;
-        if !output.ends_with('\n') {
-            append_bounded(&mut output, "\n", job)?;
-        }
+        let label = item
+            .path
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .strip_suffix(".xhtml")
+            .or_else(|| item.path.rsplit('/').next())
+            .filter(|name| !name.is_empty())
+            .map(|name| name.replace('_', " ").replace('-', " "))
+            .unwrap_or_else(|| format!("Chapter {}", index + 1));
+        chapters.push(EpubChapter {
+            label,
+            text: chapter,
+        });
     }
-    Ok(output)
+    Ok(EpubBook {
+        title,
+        creators,
+        language,
+        chapters,
+    })
 }
 
 fn load(path: &Path, job: &Job) -> Result<Package> {
@@ -751,6 +808,13 @@ mod tests {
         assert!(text.contains("Hello\nFish & chips\nFinal."));
         assert!(!text.contains("do not execute"));
         assert!(!text.contains("hidden title"));
+        let book = read_book(&path, &Job::new()).unwrap();
+        assert_eq!(book.title.as_deref(), Some("Sample & Book"));
+        assert_eq!(book.creators, vec!["Author".to_owned()]);
+        assert_eq!(book.language.as_deref(), Some("en"));
+        assert_eq!(book.chapters.len(), 1);
+        assert_eq!(book.chapters[0].label, "chapter 1");
+        assert!(book.chapters[0].text.contains("Fish & chips"));
     }
 
     #[test]
@@ -775,6 +839,19 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(&inspected.preview).unwrap()["format"],
             "EPUB"
         );
+        #[cfg(feature = "gui")]
+        {
+            let reader = crate::handle(
+                localwright_core::Request {
+                    operation: "epub-reader".into(),
+                    input: dir.path().join("book.epub"),
+                    ..Default::default()
+                },
+                Job::new(),
+            )
+            .unwrap();
+            assert!(reader.preview.contains("native EPUB reader"));
+        }
         let extracted = crate::handle(
             localwright_core::Request {
                 operation: "epub-text".into(),
