@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a pinned, app-private Linux x86_64 Tesseract pack on a native runner.
+"""Build a pinned, app-private Linux Tesseract pack on a native runner.
 
 This script prepares an unsigned development asset bundle. It does not modify
 the host, install the engine globally, or run during application execution.
@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import shutil
 import subprocess
 import tarfile
@@ -29,6 +30,21 @@ CORE_LIBRARIES = (
     "libc.so", "libm.so", "libpthread.so", "libdl.so", "librt.so",
     "libresolv.so", "ld-linux", "linux-vdso",
 )
+NATIVE_TARGETS = {
+    "x86_64-unknown-linux-gnu": {"x86_64", "amd64"},
+    "aarch64-unknown-linux-gnu": {"aarch64", "arm64"},
+}
+
+
+def validate_native_target(target: str, machine: str | None = None) -> None:
+    """Reject cross-building this pack; runtime libraries come from the host."""
+    expected = NATIVE_TARGETS.get(target)
+    actual = (machine or platform.machine()).lower()
+    if platform.system() != "Linux" or expected is None or actual not in expected:
+        raise RuntimeError(
+            f"OCR pack target {target} must be built on a matching native Linux runner; "
+            f"host is {platform.system()} {actual}"
+        )
 
 
 def download(url: str, destination: Path, expected_sha256: str, limit: int) -> None:
@@ -62,10 +78,15 @@ def owner_package(path: Path) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--target", choices=sorted(NATIVE_TARGETS), required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.output.exists():
         parser.error("output directory must not already exist")
+    try:
+        validate_native_target(args.target)
+    except RuntimeError as error:
+        parser.error(str(error))
 
     with tempfile.TemporaryDirectory(prefix="document-ocr-build-") as temp_name:
         temp = Path(temp_name)

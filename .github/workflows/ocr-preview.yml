@@ -11,9 +11,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-x64-offline-ocr:
-    name: Linux x64 private OCR preview
-    runs-on: ubuntu-24.04
+  linux-offline-ocr:
+    name: Linux ${{ matrix.arch }} private OCR preview
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x64
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
     timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: always
@@ -34,7 +44,7 @@ jobs:
       - name: Build and verify pinned Tesseract and English model pack
         run: |
           export OCR_PACK="$RUNNER_TEMP/document-ocr-pack/engines/tesseract"
-          python3 packaging/build_ocr_pack.py --output "$OCR_PACK"
+          python3 packaging/build_ocr_pack.py --target "${{ matrix.target }}" --output "$OCR_PACK"
           echo "OCR_PACK=$OCR_PACK" >> "$GITHUB_ENV"
           cat "${OCR_PACK%/tesseract}/ocr-build-pins.env"
 
@@ -56,21 +66,21 @@ jobs:
           source "${OCR_PACK%/tesseract}/ocr-build-pins.env"
           export DOCUMENT_OCR_TESSERACT_SHA256 DOCUMENT_OCR_ENGLISH_SHA256 DOCUMENT_OCR_LIBRARIES_SHA256
           CARGO_PROFILE_RELEASE_STRIP=symbols \
-            cargo build --locked --release --features ocr --target x86_64-unknown-linux-gnu
+            cargo build --locked --release --features ocr --target "${{ matrix.target }}"
 
       - name: Package, extract and smoke-test offline OCR
         env:
           DOCUMENT_OCR_REQUIRE_NETWORK_TRACE: "1"
         run: |
           python3 packaging/portable.py \
-            --target x86_64-unknown-linux-gnu \
-            --binary target/x86_64-unknown-linux-gnu/release/document-studio \
+            --target "${{ matrix.target }}" \
+            --binary "target/${{ matrix.target }}/release/document-studio" \
             --ocr-pack "$OCR_PACK" \
             --output dist/preview-ocr
 
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: document-studio-private-ocr-preview-linux-x64
+          name: document-studio-private-ocr-preview-linux-${{ matrix.arch }}
           path: dist/preview-ocr/
           if-no-files-found: error
           retention-days: 14

@@ -17,7 +17,7 @@ The target matrix retains all 15 combinations. The installable formats in this m
 Windows MSI and EXE must use the same product identity and payload, separately verify repair/upgrade/uninstall and architecture, and embed all payloads. Candidate application ID `org.localwright.DocumentStudio` is not a verified owner namespace or trademark. Product GUID generated deterministically as a proposed identifier, not an existing registered product. Review before fixing identity. Linux and macOS require real-device validation. No signing keys, service accounts or secrets are included.
 
 ## Portable CI previews
-The Linux OCR development variant can bundle a reviewed private engine and execute the packaged fixture. See [OCR engine documentation](../docs/OCR_ENGINE.md).
+The Linux OCR development variant builds the pinned private Tesseract and English model on native Linux x64 and ARM64 runners, bundles their dependency notices, and executes the packaged OCR fixture from the extracted archive. The ARM64 target is under verification in the current development change; the previously verified preview covered Linux x64 only. Neither target currently proves installer lifecycle or full v1.3 cross-platform OCR acceptance. See [OCR engine documentation](../docs/OCR_ENGINE.md).
 
 
 Manually run the `Distribution preparation` workflow with `portable-preview` to create an unsigned archive on each native target. The workflow extracts every archive, runs CLI help from the extracted payload, and includes a SHA-256 checksum. Download the artifacts from the completed workflow run. These archives are for evaluation only. Linux may require system libraries, and macOS Gatekeeper may block an unsigned executable.

@@ -89,6 +89,9 @@ jobs:
               ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
           PY
 
+      - name: Verify fast offline packer tests
+        run: python3 -m unittest discover -s packaging -p 'test_*.py' -v
+
       - name: Install Linux GUI build prerequisites
         if: steps.scope.outputs.code_changed == 'true'
         run: |
