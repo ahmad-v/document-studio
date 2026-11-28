@@ -132,8 +132,54 @@ pub(crate) struct PagePixels {
 #[derive(Debug)]
 pub(crate) struct ViewerBatch {
     pub(crate) page_count: usize,
+    pub(crate) properties: PdfProperties,
+    pub(crate) page_width_points: f32,
+    pub(crate) page_height_points: f32,
     pub(crate) preview: PagePixels,
     pub(crate) thumbnails: Vec<PagePixels>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PdfProperties {
+    pub(crate) version: String,
+    pub(crate) byte_length: u64,
+    pub(crate) title: Option<String>,
+    pub(crate) author: Option<String>,
+    pub(crate) subject: Option<String>,
+    pub(crate) creator: Option<String>,
+    pub(crate) producer: Option<String>,
+}
+
+fn pdf_metadata_text(document: &Document, key: &[u8]) -> Option<String> {
+    let info = document
+        .trailer
+        .get(b"Info")
+        .ok()
+        .and_then(|object| match object {
+            Object::Reference(id) => document.get_object(*id).ok(),
+            value => Some(value),
+        })?;
+    let value = info.as_dict().ok()?.get(key).ok()?;
+    let decoded = lopdf::decode_text_string(value).ok()?;
+    let cleaned = decoded
+        .chars()
+        .filter(|character| !character.is_control() || matches!(character, '\t' | '\n' | '\r'))
+        .take(512)
+        .collect::<String>();
+    let cleaned = cleaned.trim().to_owned();
+    (!cleaned.is_empty()).then_some(cleaned)
+}
+
+fn pdf_properties(document: &Document, byte_length: u64) -> PdfProperties {
+    PdfProperties {
+        version: document.version.clone(),
+        byte_length,
+        title: pdf_metadata_text(document, b"Title"),
+        author: pdf_metadata_text(document, b"Author"),
+        subject: pdf_metadata_text(document, b"Subject"),
+        creator: pdf_metadata_text(document, b"Creator"),
+        producer: pdf_metadata_text(document, b"Producer"),
+    }
 }
 
 fn render_page_bitmap(
@@ -206,6 +252,7 @@ pub(crate) fn render_viewer_batch(
         ));
     }
     let bytes = read_bounded(path, MAX_DOCUMENT_BYTES)?;
+    let byte_length = bytes.len() as u64;
     let document =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_pdf_bytes(&bytes)))
             .map_err(|_| {
@@ -231,6 +278,8 @@ pub(crate) fn render_viewer_batch(
     let page = pages
         .get(page_number - 1)
         .ok_or_else(|| Error::input("PDF renderer could not find the requested page"))?;
+    let (page_width_points, page_height_points) = page.render_dimensions();
+    let properties = pdf_properties(&document, byte_length);
     let preview = render_page_bitmap(page, page_number, PREVIEW_MAX_EDGE as u16, job)?;
     let mut thumbnails = Vec::with_capacity(thumbnail_pages.len());
     for thumbnail_page in thumbnail_pages {
@@ -245,6 +294,9 @@ pub(crate) fn render_viewer_batch(
     }
     Ok(ViewerBatch {
         page_count,
+        properties,
+        page_width_points,
+        page_height_points,
         preview,
         thumbnails,
     })
@@ -571,10 +623,18 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
         }
         "pdf-info" => {
             let document = load(&r.input)?;
+            let properties =
+                pdf_properties(&document, std::fs::metadata(&r.input).map_err(err)?.len());
             let report = serde_json::to_string_pretty(&serde_json::json!({
                 "schema_version": 1,
-                "pdf_version": document.version,
+                "pdf_version": properties.version,
                 "pages": document.get_pages().len(),
+                "file_bytes": properties.byte_length,
+                "title": properties.title,
+                "author": properties.author,
+                "subject": properties.subject,
+                "creator": properties.creator,
+                "producer": properties.producer,
             }))?;
             if !r.output.as_os_str().is_empty() {
                 extension(&r.output, "json")?;
@@ -688,6 +748,27 @@ pub fn handle(r: Request, j: Job) -> Result<Outcome> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pdf_properties_decode_bounded_unicode_metadata_and_file_size() {
+        let mut document = Document::with_version("1.7");
+        document.trailer.set(
+            "Info",
+            Object::Dictionary(dictionary! {
+                "Title" => lopdf::text_string("Résumé\u{0007} study"),
+                "Author" => lopdf::text_string("Ada Lovelace"),
+                "Producer" => lopdf::text_string("Local PDF producer"),
+            }),
+        );
+        let properties = pdf_properties(&document, 1234);
+        assert_eq!(properties.version, "1.7");
+        assert_eq!(properties.byte_length, 1234);
+        assert_eq!(properties.title.as_deref(), Some("Résumé study"));
+        assert_eq!(properties.author.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(properties.producer.as_deref(), Some("Local PDF producer"));
+        assert!(properties.subject.is_none());
+        assert!(properties.creator.is_none());
+    }
+
     #[test]
     fn docx_parts() {
         let d = tempfile::tempdir().unwrap();
