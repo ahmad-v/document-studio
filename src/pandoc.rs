@@ -3,8 +3,8 @@
 //! This route does not preserve page layout and deliberately does not render PDF.
 
 use localwright_core::{
-    engine::{EngineInvocation, EngineRuntime}, read_bounded, write_bytes, Capability, Error,
-    ErrorKind, Job, Outcome, Result,
+    engine::{EngineInvocation, EngineRuntime},
+    read_bounded, write_bytes, Capability, Error, ErrorKind, Job, Outcome, Result,
 };
 use serde::Deserialize;
 use std::{io::Cursor, path::Path};
@@ -131,7 +131,10 @@ fn preflight_container(bytes: &[u8], source_format: &str, job: &Job) -> Result<(
             ));
         }
         expanded = expanded.checked_add(entry.size()).ok_or_else(|| {
-            Error::new(ErrorKind::Limit, "Archive expanded-size accounting overflow")
+            Error::new(
+                ErrorKind::Limit,
+                "Archive expanded-size accounting overflow",
+            )
         })?;
         if expanded > MAX_CONTAINER_EXPANDED_BYTES {
             return Err(Error::new(
@@ -247,10 +250,16 @@ mod tests {
 
     #[test]
     fn conversion_metadata_is_bounded_and_passed_as_arguments() {
-        let values = metadata(r#"{"title":"Lab report","author":"A. Researcher","language":"en-GB"}"#).unwrap();
+        let values =
+            metadata(r#"{"title":"Lab report","author":"A. Researcher","language":"en-GB"}"#)
+                .unwrap();
         let args = invocation_arguments("markdown", "docx", &values);
-        assert!(args.iter().any(|value| value == "--metadata=title:Lab report"));
-        assert!(args.iter().any(|value| value == "--metadata=author:A. Researcher"));
+        assert!(args
+            .iter()
+            .any(|value| value == "--metadata=title:Lab report"));
+        assert!(args
+            .iter()
+            .any(|value| value == "--metadata=author:A. Researcher"));
         assert!(args.iter().any(|value| value == "--metadata=lang:en-GB"));
         assert_eq!(args.last().map(String::as_str), Some("-"));
         assert!(metadata(r#"{"language":"en--US"}"#).is_err());

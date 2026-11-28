@@ -7,9 +7,9 @@ mod epub;
 mod epub_reader;
 mod markdown_epub;
 mod markdown_html;
-mod pandoc;
 #[cfg(feature = "ocr")]
 mod ocr;
+mod pandoc;
 mod pdf_compare;
 mod pdf_page_compare;
 #[cfg(feature = "gui")]
