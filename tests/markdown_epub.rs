@@ -30,7 +30,7 @@ fn markdown_to_epub_builds_a_bounded_self_contained_epub3_package() {
     let file = std::fs::File::open(&output).unwrap();
     let mut archive = ZipArchive::new(file).unwrap();
     let mimetype = archive.by_index(0).unwrap();
-    assert_eq!(mimetype.name(), "mimetype");
+    assert_eq!(mimetype.name().unwrap(), "mimetype");
     assert_eq!(mimetype.compression(), zip::CompressionMethod::Stored);
     let mut package = String::new();
     archive
