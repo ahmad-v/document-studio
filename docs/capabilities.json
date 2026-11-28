@@ -66,6 +66,20 @@
       "fixture_status": "Linux fixtures and independent Python DOCX verification passed"
     },
     {
+      "operation": "epub-inspect",
+      "description": "Bounded EPUB mimetype, container, metadata, manifest and spine inspection; not a complete conformance validator or layout renderer",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "Added metadata, spine, traversal, malformed XHTML and mimetype fixtures; hosted verification pending"
+    },
+    {
+      "operation": "epub-text",
+      "description": "Bounded plain-text extraction from XHTML spine items in reading order; omits layout, CSS, images, navigation, scripts and DRM-protected content",
+      "status": "implemented-unverified",
+      "targets": [],
+      "fixture_status": "Added reading-order, XML entity and script-exclusion fixtures; hosted verification pending"
+    },
+    {
       "operation": "compare-text",
       "description": "UTF-8 line changes with optional text report",
       "status": "implemented-unverified",
