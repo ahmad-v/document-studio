@@ -2,7 +2,7 @@
 
 #[cfg(not(target_os = "windows"))]
 use localwright_core::{
-    engine::{EngineInvocation, EngineRuntime, EngineSpec},
+    engine::{EngineInvocation, EngineRunOptions, EngineRuntime, EngineSpec},
     Capability,
 };
 use localwright_core::{read_bounded, Error, ErrorKind, Job, Result};
@@ -282,7 +282,7 @@ fn run_with_engine_runtime(request: RuntimeRequest<'_>, job: &Job) -> Result<Vec
     if pdf {
         args.extend(["-c".into(), "tessedit_create_pdf=1".into()]);
     }
-    let output = engine.run(
+    let output = engine.run_with_options(
         EngineInvocation {
             args,
             environment: [
@@ -291,8 +291,10 @@ fn run_with_engine_runtime(request: RuntimeRequest<'_>, job: &Job) -> Result<Vec
             ]
             .into_iter()
             .collect(),
-            hide_console: cfg!(target_os = "windows"),
             ..EngineInvocation::default()
+        },
+        EngineRunOptions {
+            hide_console: cfg!(target_os = "windows"),
         },
         job,
     )?;
