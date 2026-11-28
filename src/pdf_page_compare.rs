@@ -195,30 +195,39 @@ mod tests {
     use std::path::Path;
     use tempfile::tempdir;
 
-    fn one_page_pdf(path: &Path, paint: &str, width: i64) {
+    fn pdf_with_pages(path: &Path, page_contents: &[(&str, i64)]) {
         let mut document = Document::with_version("1.7");
         let parent = document.new_object_id();
-        let content = document.add_object(lopdf::Stream::new(
-            dictionary! {},
-            format!("{paint} 0 0 {width} 300 re f").into_bytes(),
-        ));
-        let page = document.add_object(dictionary! {
-            "Type" => "Page",
-            "Parent" => parent,
-            "Contents" => content,
-        });
+        let mut pages = Vec::new();
+        let mut max_width = 0;
+        for (paint, width) in page_contents {
+            max_width = max_width.max(*width);
+            let content = document.add_object(lopdf::Stream::new(
+                dictionary! {},
+                format!("{paint} 0 0 {width} 300 re f").into_bytes(),
+            ));
+            pages.push(document.add_object(dictionary! {
+                "Type" => "Page",
+                "Parent" => parent,
+                "Contents" => content,
+            }));
+        }
         document.objects.insert(
             parent,
             Object::Dictionary(dictionary! {
                 "Type" => "Pages",
-                "Kids" => vec![Object::Reference(page)],
-                "Count" => 1,
-                "MediaBox" => vec![0.into(), 0.into(), width.into(), 300.into()],
+                "Kids" => pages.iter().copied().map(Object::Reference).collect::<Vec<_>>(),
+                "Count" => pages.len() as i64,
+                "MediaBox" => vec![0.into(), 0.into(), max_width.into(), 300.into()],
             }),
         );
         let root = document.add_object(dictionary! { "Type" => "Catalog", "Pages" => parent });
         document.trailer.set("Root", root);
         document.save(path).unwrap();
+    }
+
+    fn one_page_pdf(path: &Path, paint: &str, width: i64) {
+        pdf_with_pages(path, &[(paint, width)]);
     }
 
     #[test]
@@ -227,14 +236,14 @@ mod tests {
         let first = directory.path().join("first.pdf");
         let identical = directory.path().join("identical.pdf");
         let modified = directory.path().join("modified.pdf");
-        one_page_pdf(&first, "0 0 0 rg", 200);
+        pdf_with_pages(&first, &[("0 0 0 rg", 200), ("0 0 0 rg", 200)]);
         one_page_pdf(&identical, "0 0 0 rg", 200);
         one_page_pdf(&modified, "1 0 0 rg", 200);
 
         let same_output = directory.path().join("same.png");
         let same_parameter = serde_json::json!({
             "second_pdf": identical.to_str().unwrap(),
-            "first_page": 1,
+            "first_page": 2,
             "second_page": 1,
         })
         .to_string();
@@ -252,6 +261,7 @@ mod tests {
         let same_report: serde_json::Value = serde_json::from_str(&same_outcome.preview).unwrap();
         assert_eq!(same_report["result"], "pixel-identical-render");
         assert_eq!(same_report["changed_pixels"], 0);
+        assert_eq!(same_report["first"]["page"], 2);
         assert!(same_output.exists());
         let same_image = image::open(&same_output).unwrap().to_rgba8();
         assert!(same_image.width() > 0 && same_image.height() > 0);
